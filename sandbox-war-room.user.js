@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Sandbox War Room 🧪
 // @namespace    jay-torn-war-script-sandbox
-// @version      1.99.12
+// @version      1.99.13
 // @downloadURL  https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @updateURL    https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @description  [SANDBOX - test build, not for general use] Enemy hospital timers, quick attack links, and a chain timeout alert overlay for Torn faction war pages. Works in Tampermonkey (Firefox) and Torn PDA.
@@ -529,7 +529,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.12';
+  const SCRIPT_VERSION = '1.99.13';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -1111,6 +1111,11 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
   function validLastWar() {
     if (!lastWar) return null;
     if (Date.now() / 1000 - lastWar.endTime > LAST_WAR_KEEP_SEC) return null;
+    // Changed faction since that war: it isn't your war any more.
+    try {
+      const own = getOwnFactionId();
+      if (own && lastWar.ownId && String(own) !== String(lastWar.ownId)) return null;
+    } catch (e) { /* ignore */ }
     return lastWar;
   }
 
