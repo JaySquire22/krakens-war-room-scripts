@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Sandbox War Room 🧪
 // @namespace    jay-torn-war-script-sandbox
-// @version      1.99.13
+// @version      1.99.14
 // @downloadURL  https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @updateURL    https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @description  [SANDBOX - test build, not for general use] Enemy hospital timers, quick attack links, and a chain timeout alert overlay for Torn faction war pages. Works in Tampermonkey (Firefox) and Torn PDA.
@@ -529,7 +529,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.13';
+  const SCRIPT_VERSION = '1.99.14';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -1560,8 +1560,10 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
   }
   function atkLogList() {
     const ownId = String(getOwnFactionId() || '');
-    return loadAtkLog().filter((x) => atkLogFilter === 'all'
-      || (atkLogFilter === 'out' ? String(x.aF) === ownId : String(x.dF) === ownId));
+    // Only hits involving the faction you are in now (a faction change leaves the old log behind).
+    return loadAtkLog().filter((x) => (!ownId || String(x.aF) === ownId || String(x.dF) === ownId)
+      && (atkLogFilter === 'all'
+      || (atkLogFilter === 'out' ? String(x.aF) === ownId : String(x.dF) === ownId)));
   }
   // Retal countdown shown inside the Retal button (time left in the window).
   function fmtRetalLeft(sec) {
