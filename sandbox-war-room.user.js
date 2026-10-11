@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Sandbox War Room 🧪
 // @namespace    jay-torn-war-script-sandbox
-// @version      1.99.14
+// @version      1.99.15
 // @downloadURL  https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @updateURL    https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @description  [SANDBOX - test build, not for general use] Enemy hospital timers, quick attack links, and a chain timeout alert overlay for Torn faction war pages. Works in Tampermonkey (Firefox) and Torn PDA.
@@ -529,7 +529,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.14';
+  const SCRIPT_VERSION = '1.99.15';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -7367,6 +7367,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
   // STATE
   // ---------------------------------------------------------------------
   let pageMode = 'home'; // 'home' | 'war' | 'enemy-page'
+  let pageModeSet = false;
   // Early war-matchup detection (before the war has started) -- see
   // findActiveWar.
   let upcomingWar = null; // { enemyId, enemyName, startTime }
@@ -7620,6 +7621,9 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
       mode = 'home';
       enemyId = null;
     }
+    // Out of a war: start on Home (Enemy/Target stay visible with a "no war" note).
+    if (mode === 'home' && (pageMode !== mode || !pageModeSet) && (viewSide === 'enemy' || viewSide === 'target')) viewSide = 'home';
+    pageModeSet = true;
     pageMode = mode;
     enemyFactionId = enemyId || null;
 
@@ -7654,9 +7658,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
     // page context, so the user never lands on a tab with nothing to show --
     // but only when the current tab genuinely isn't valid here, so this
     // doesn't fight the user out of the Target tab on every poll.
-    const validSides = (pageMode === 'home'
-      ? ['home']
-      : ['enemy', 'home'].concat(featureOn('targets') ? ['target'] : []))
+    const validSides = ['enemy', 'home'].concat(featureOn('targets') ? ['target'] : [])
       .concat(featureOn('atkLog') ? ['log'] : []);
     if (!validSides.includes(viewSide)) {
       viewSide = pageMode === 'home' ? 'home' : 'enemy';
@@ -9293,9 +9295,9 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
         <div style="color:#888;font-size:11px;margin:2px 0 8px;">Loadouts Torn reveals on attack pages you view are shared with other contributors when “Share loadouts” below is on. Your Torn API key stays on this device and is never uploaded with shared intel.</div>
         <button id="tws-ki-clear-captures" style="margin-bottom:6px;">🐙 Clear cached observations</button>
         <button id="tws-ki-clear-items" style="margin-bottom:10px;">🐙 Clear cached item details</button>
-        ${isOwnerCached() ? `
-        <div class="tws-adv-group" style="margin-top:0;">\u26a1 Shared Retal (owner \u00b7 testing)</div>
-        <div style="color:#888;font-size:11px;margin:2px 0 8px;">Stores your API key <b>encrypted</b> on the Kraken server. It is used only to read your faction\u2019s recent attacks (every 15s, only while a member has a war open) so every member\u2019s Retal button works. It is never shown to anyone and is deleted as soon as you switch this off. Retal source right now: <b>${retalSource || 'not checked yet'}</b></div>
+        ${true ? `
+        <div class="tws-adv-group" style="margin-top:0;">\u26a1 Share my key for Retal</div>
+        <div style="color:#888;font-size:11px;margin:2px 0 8px;">Needs a key with faction API access (one sharer covers the whole faction, including new recruits). Stores your API key <b>encrypted</b> on the Kraken server. It is used only to read your faction\u2019s recent attacks (every 15s, only while a member has a war open) so every member\u2019s Retal button works. It is never shown to anyone and is deleted as soon as you switch this off. Retal source right now: <b>${retalSource || 'not checked yet'}</b></div>
         <label class="tws-adv-row" style="margin-bottom:8px;">
           <input type="checkbox" id="tws-retal-share-toggle" ${getCfg(RETAL_SHARED_KEY, false) === true ? 'checked' : ''}>
           <span>\u26a1 Share my key for Retal<small id="tws-retal-share-note">Off = your key is deleted from the server straight away.</small></span>
@@ -9325,7 +9327,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
           const fac = getOwnFactionId();
           if (!me || !fac) return;
           const d = await serverGet(`${RETAL_URL}?faction=${encodeURIComponent(fac)}&me=${encodeURIComponent(me)}`);
-          if (d && typeof d.shared === 'boolean' && retalToggle.isConnected && !retalToggle.disabled) setShared(d.shared);
+          if (d && typeof d.shared === 'boolean' && retalToggle.isConnected && !retalToggle.disabled) setShared(typeof d.mine === 'boolean' ? d.mine : d.shared);
         } catch (e) { /* keep the saved state */ }
       })();
       retalToggle.addEventListener('change', () => {
@@ -10514,6 +10516,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
     const isEnemySide = viewSide === 'enemy' || viewSide === 'target';
     const activeMembers = viewSide === 'home'
       ? homeMembers
+      : pageMode === 'home' ? [] // no war: never show an old enemy roster
       : viewSide === 'target'
         ? enemyMembers.filter((m) => targetIds.has(m.id))
         : enemyMembers;
@@ -10699,9 +10702,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
     // since it's just a filtered subset of the same roster. Home is now
     // available on the enemy's own page too, since we fetch it there
     // regardless of pageMode.
-    const availableTabs = wideCol ? [] : ((pageMode === 'war' || pageMode === 'enemy-page')
-      ? [['enemy', 'Enemy'], ['home', 'Home']].concat(featureOn('targets') ? [['target', 'Target']] : [])
-      : [['home', 'Home']])
+    const availableTabs = wideCol ? [] : [['enemy', 'Enemy'], ['home', 'Home']].concat(featureOn('targets') ? [['target', 'Target']] : [])
       .concat(featureOn('atkLog') ? [['log', 'Attacks']] : []);
     const colTitleHtml = wideCol ? `<div class="tws-col-title">${wideColTitle(wideCol)}</div>` : '';
     const tabsHtml = availableTabs.length > 1
@@ -10738,7 +10739,10 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
       </div>
     ` : '';
 
-    const emptyMessage = viewSide === 'target'
+    const noWarMsg = '<b>No war right now.</b><br>Your faction isn\u2019t in a ranked war, so there are no enemies to show. This tab fills in by itself once a war is drawn.'
+      + (viewSide === 'target' ? '<br><br>Then tap \u2606 next to a name in the Enemy tab to add them here.' : '')
+      ;
+    const emptyMessage = (pageMode === 'home' && viewSide !== 'home') ? noWarMsg : viewSide === 'target'
       ? 'No targets selected. Tap ☆ next to a name in the Enemy tab to add them here.'
       : 'No members match this view.';
 
