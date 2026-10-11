@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name         PC War Room 🖥️ (trial)
 // @namespace    jay-torn-war-script-pcwide
-// @version      1.2.1
-// @downloadURL  https://macaly-s5cfqg7fhi1a9w976i319j8o-prod.macaly-app.com/pc-war-room.user.js
-// @updateURL    https://macaly-s5cfqg7fhi1a9w976i319j8o-prod.macaly-app.com/pc-war-room.user.js
+// @version      1.2.2
+// @downloadURL  https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/pc-war-room.user.js
+// @updateURL    https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/pc-war-room.user.js
 // @description  [PC TRIAL - built from Sandbox build 1.85.9] Wide PC layout: Enemy | Home | Attacks log side by side. Run INSTEAD of War Room / the sandbox, not alongside.
 // @author       -TheKraken- [3616083]
 // @copyright    2026, -TheKraken- [3616083] - All rights reserved
@@ -14,7 +14,7 @@
 // @connect      lilywaterbug.alwaysdata.net
 // @connect      www.torn.com
 // @connect      igiyqcgpwonbbjdnvxwd.supabase.co
-// @connect      savory-fly-917.eu-west-1.convex.site
+// @connect      dashing-fish-54.eu-west-1.convex.site
 // @grant        GM_xmlhttpRequest
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -236,7 +236,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.2.1';
+  const SCRIPT_VERSION = '1.2.2';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -1082,7 +1082,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
     return Number(a.ended || a.timestamp_ended || atkStarted(a)) || 0;
   }
 
-  const RETAL_URL = 'https://savory-fly-917.eu-west-1.convex.site/retal';
+  const RETAL_URL = 'https://dashing-fish-54.eu-west-1.convex.site/retal';
   const RETAL_SHARED_KEY = 'tws_retal_shared'; // this device's last known share state
   let retalSource = ''; // 'server' | 'own' | 'none' (shown in the owner's Advanced section)
 
@@ -1684,7 +1684,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
   }
 
   // ---- shared intel (Kraken server -> Supabase) ----
-  const KI_SERVER_URL = 'https://savory-fly-917.eu-west-1.convex.site/ki';
+  const KI_SERVER_URL = 'https://dashing-fish-54.eu-west-1.convex.site/ki';
   function kiSharedRowToCapture(row) {
     if (!kiObjectRecord(row) || !kiPositiveInteger(row.target_id) || !Array.isArray(row.items)) return null;
     return {
@@ -5160,7 +5160,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
   //     remembered per player.
   //  Tapping a travel timer shows the estimate for every method.
   // ---------------------------------------------------------------------
-  const TRAVEL_URL = 'https://savory-fly-917.eu-west-1.convex.site/travel';
+  const TRAVEL_URL = 'https://dashing-fish-54.eu-west-1.convex.site/travel';
   // One-way flight minutes: standard, airstrip, private (WLT), business.
   const TRAVEL_MIN = {
     mexico: [24, 17, 12, 7],
@@ -9281,7 +9281,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
   // server decides; this copy asks it on load (answer cached 5 minutes) and
   // re-checks whenever a trial or paid week runs out.
   // ---------------------------------------------------------------------
-  const ACCESS_URL = 'https://savory-fly-917.eu-west-1.convex.site/access';
+  const ACCESS_URL = 'https://dashing-fish-54.eu-west-1.convex.site/access';
   const ACCESS_CACHE_KEY = 'tws_access_v1';
   const ACCESS_ID_KEY = 'tws_access_me';
   const ACCESS_RECHECK_MS = 5 * 60 * 1000;
@@ -9317,7 +9317,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
 
   // Proof of identity for the Kraken server: key sent once to /auth, checked
   // with Torn and not kept; a signed pass (30 days) goes with server calls.
-  const AUTH_URL = 'https://savory-fly-917.eu-west-1.convex.site/auth';
+  const AUTH_URL = 'https://dashing-fish-54.eu-west-1.convex.site/auth';
   const PASS_KEY = 'tws_pass_v1';
   let passInFlight = null;
   async function getPass(force) {
