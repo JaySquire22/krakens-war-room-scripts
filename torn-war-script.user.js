@@ -1,7 +1,9 @@
 // ==UserScript==
 // @name         Krakens War Room 🐙
 // @namespace    jay-torn-war-script
-// @version      1.99.11
+// @version      1.99.15
+// @downloadURL  https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/torn-war-script.user.js
+// @updateURL    https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/torn-war-script.user.js
 // @description  Enemy hospital timers, quick attack links, and a chain timeout alert overlay for Torn faction war pages. Works in Tampermonkey (Firefox) and Torn PDA.
 // @author       -TheKraken- [3616083]
 // @copyright    2026, -TheKraken- [3616083] - All rights reserved
@@ -14,7 +16,7 @@
 // @connect      what-the-f.de
 // @connect      www.torn.com
 // @connect      igiyqcgpwonbbjdnvxwd.supabase.co
-// @connect      savory-fly-917.eu-west-1.convex.site
+// @connect      dashing-fish-54.eu-west-1.convex.site
 // @grant        GM_xmlhttpRequest
 // @grant        GM_setValue
 // @grant        GM_getValue
@@ -527,7 +529,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.11';
+  const SCRIPT_VERSION = '1.99.15';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -1109,6 +1111,11 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
   function validLastWar() {
     if (!lastWar) return null;
     if (Date.now() / 1000 - lastWar.endTime > LAST_WAR_KEEP_SEC) return null;
+    // Changed faction since that war: it isn't your war any more.
+    try {
+      const own = getOwnFactionId();
+      if (own && lastWar.ownId && String(own) !== String(lastWar.ownId)) return null;
+    } catch (e) { /* ignore */ }
     return lastWar;
   }
 
@@ -1389,7 +1396,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
     return Number(a.ended || a.timestamp_ended || atkStarted(a)) || 0;
   }
 
-  const RETAL_URL = 'https://savory-fly-917.eu-west-1.convex.site/retal';
+  const RETAL_URL = 'https://dashing-fish-54.eu-west-1.convex.site/retal';
   const RETAL_SHARED_KEY = 'tws_retal_shared'; // this device's last known share state
   let retalSource = ''; // 'server' | 'own' | 'none' (shown in the owner's Advanced section)
 
@@ -1553,8 +1560,10 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
   }
   function atkLogList() {
     const ownId = String(getOwnFactionId() || '');
-    return loadAtkLog().filter((x) => atkLogFilter === 'all'
-      || (atkLogFilter === 'out' ? String(x.aF) === ownId : String(x.dF) === ownId));
+    // Only hits involving the faction you are in now (a faction change leaves the old log behind).
+    return loadAtkLog().filter((x) => (!ownId || String(x.aF) === ownId || String(x.dF) === ownId)
+      && (atkLogFilter === 'all'
+      || (atkLogFilter === 'out' ? String(x.aF) === ownId : String(x.dF) === ownId)));
   }
   // Retal countdown shown inside the Retal button (time left in the window).
   function fmtRetalLeft(sec) {
@@ -2527,7 +2536,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
   }
 
   // ---- shared intel (Kraken server -> Supabase) ----
-  const KI_SERVER_URL = 'https://savory-fly-917.eu-west-1.convex.site/ki';
+  const KI_SERVER_URL = 'https://dashing-fish-54.eu-west-1.convex.site/ki';
   function kiSharedRowToCapture(row) {
     if (!kiObjectRecord(row) || !kiPositiveInteger(row.target_id) || !Array.isArray(row.items)) return null;
     return {
@@ -6497,7 +6506,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
   //     remembered per player.
   //  Tapping a travel timer shows the estimate for every method.
   // ---------------------------------------------------------------------
-  const TRAVEL_URL = 'https://savory-fly-917.eu-west-1.convex.site/travel';
+  const TRAVEL_URL = 'https://dashing-fish-54.eu-west-1.convex.site/travel';
   // One-way flight minutes: standard, airstrip, private (WLT), business.
   const TRAVEL_MIN = {
     mexico: [24, 17, 12, 7],
@@ -6655,7 +6664,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
 
   // Activity history from the Kraken server: per TCT hour, how likely each
   // enemy member is to be online. Paid server feature; refreshed every 5 min.
-  const ACTIVITY_URL = 'https://savory-fly-917.eu-west-1.convex.site/activity';
+  const ACTIVITY_URL = 'https://dashing-fish-54.eu-west-1.convex.site/activity';
   const ACTIVITY_MS = 5 * 60 * 1000;
   let activity = {};
   let activityFaction = '';
@@ -6739,7 +6748,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
   }
   // Shared draw date from the Kraken server: the first time ANY War Room user saw
   // this war, so every copy agrees. Our own note is sent along (earliest wins).
-  const DRAW_URL = 'https://savory-fly-917.eu-west-1.convex.site/draw';
+  const DRAW_URL = 'https://dashing-fish-54.eu-west-1.convex.site/draw';
   const scDrawSent = {};
   async function scServerDraw(a, b, startTime) {
     if (!a || !startTime) return 0;
@@ -7358,6 +7367,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
   // STATE
   // ---------------------------------------------------------------------
   let pageMode = 'home'; // 'home' | 'war' | 'enemy-page'
+  let pageModeSet = false;
   // Early war-matchup detection (before the war has started) -- see
   // findActiveWar.
   let upcomingWar = null; // { enemyId, enemyName, startTime }
@@ -7611,6 +7621,9 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
       mode = 'home';
       enemyId = null;
     }
+    // Out of a war: start on Home (Enemy/Target stay visible with a "no war" note).
+    if (mode === 'home' && (pageMode !== mode || !pageModeSet) && (viewSide === 'enemy' || viewSide === 'target')) viewSide = 'home';
+    pageModeSet = true;
     pageMode = mode;
     enemyFactionId = enemyId || null;
 
@@ -7645,9 +7658,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
     // page context, so the user never lands on a tab with nothing to show --
     // but only when the current tab genuinely isn't valid here, so this
     // doesn't fight the user out of the Target tab on every poll.
-    const validSides = (pageMode === 'home'
-      ? ['home']
-      : ['enemy', 'home'].concat(featureOn('targets') ? ['target'] : []))
+    const validSides = ['enemy', 'home'].concat(featureOn('targets') ? ['target'] : [])
       .concat(featureOn('atkLog') ? ['log'] : []);
     if (!validSides.includes(viewSide)) {
       viewSide = pageMode === 'home' ? 'home' : 'enemy';
@@ -9284,9 +9295,9 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
         <div style="color:#888;font-size:11px;margin:2px 0 8px;">Loadouts Torn reveals on attack pages you view are shared with other contributors when “Share loadouts” below is on. Your Torn API key stays on this device and is never uploaded with shared intel.</div>
         <button id="tws-ki-clear-captures" style="margin-bottom:6px;">🐙 Clear cached observations</button>
         <button id="tws-ki-clear-items" style="margin-bottom:10px;">🐙 Clear cached item details</button>
-        ${isOwnerCached() ? `
-        <div class="tws-adv-group" style="margin-top:0;">\u26a1 Shared Retal (owner \u00b7 testing)</div>
-        <div style="color:#888;font-size:11px;margin:2px 0 8px;">Stores your API key <b>encrypted</b> on the Kraken server. It is used only to read your faction\u2019s recent attacks (every 15s, only while a member has a war open) so every member\u2019s Retal button works. It is never shown to anyone and is deleted as soon as you switch this off. Retal source right now: <b>${retalSource || 'not checked yet'}</b></div>
+        ${true ? `
+        <div class="tws-adv-group" style="margin-top:0;">\u26a1 Share my key for Retal</div>
+        <div style="color:#888;font-size:11px;margin:2px 0 8px;">Needs a key with faction API access (one sharer covers the whole faction, including new recruits). Stores your API key <b>encrypted</b> on the Kraken server. It is used only to read your faction\u2019s recent attacks (every 15s, only while a member has a war open) so every member\u2019s Retal button works. It is never shown to anyone and is deleted as soon as you switch this off. Retal source right now: <b>${retalSource || 'not checked yet'}</b></div>
         <label class="tws-adv-row" style="margin-bottom:8px;">
           <input type="checkbox" id="tws-retal-share-toggle" ${getCfg(RETAL_SHARED_KEY, false) === true ? 'checked' : ''}>
           <span>\u26a1 Share my key for Retal<small id="tws-retal-share-note">Off = your key is deleted from the server straight away.</small></span>
@@ -9316,7 +9327,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
           const fac = getOwnFactionId();
           if (!me || !fac) return;
           const d = await serverGet(`${RETAL_URL}?faction=${encodeURIComponent(fac)}&me=${encodeURIComponent(me)}`);
-          if (d && typeof d.shared === 'boolean' && retalToggle.isConnected && !retalToggle.disabled) setShared(d.shared);
+          if (d && typeof d.shared === 'boolean' && retalToggle.isConnected && !retalToggle.disabled) setShared(typeof d.mine === 'boolean' ? d.mine : d.shared);
         } catch (e) { /* keep the saved state */ }
       })();
       retalToggle.addEventListener('change', () => {
@@ -10505,6 +10516,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
     const isEnemySide = viewSide === 'enemy' || viewSide === 'target';
     const activeMembers = viewSide === 'home'
       ? homeMembers
+      : pageMode === 'home' ? [] // no war: never show an old enemy roster
       : viewSide === 'target'
         ? enemyMembers.filter((m) => targetIds.has(m.id))
         : enemyMembers;
@@ -10690,9 +10702,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
     // since it's just a filtered subset of the same roster. Home is now
     // available on the enemy's own page too, since we fetch it there
     // regardless of pageMode.
-    const availableTabs = wideCol ? [] : ((pageMode === 'war' || pageMode === 'enemy-page')
-      ? [['enemy', 'Enemy'], ['home', 'Home']].concat(featureOn('targets') ? [['target', 'Target']] : [])
-      : [['home', 'Home']])
+    const availableTabs = wideCol ? [] : [['enemy', 'Enemy'], ['home', 'Home']].concat(featureOn('targets') ? [['target', 'Target']] : [])
       .concat(featureOn('atkLog') ? [['log', 'Attacks']] : []);
     const colTitleHtml = wideCol ? `<div class="tws-col-title">${wideColTitle(wideCol)}</div>` : '';
     const tabsHtml = availableTabs.length > 1
@@ -10729,7 +10739,10 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
       </div>
     ` : '';
 
-    const emptyMessage = viewSide === 'target'
+    const noWarMsg = '<b>No war right now.</b><br>Your faction isn\u2019t in a ranked war, so there are no enemies to show. This tab fills in by itself once a war is drawn.'
+      + (viewSide === 'target' ? '<br><br>Then tap \u2606 next to a name in the Enemy tab to add them here.' : '')
+      ;
+    const emptyMessage = (pageMode === 'home' && viewSide !== 'home') ? noWarMsg : viewSide === 'target'
       ? 'No targets selected. Tap ☆ next to a name in the Enemy tab to add them here.'
       : 'No members match this view.';
 
@@ -11058,7 +11071,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
   // server decides; this copy asks it on load (answer cached 5 minutes) and
   // re-checks whenever a trial or paid week runs out.
   // ---------------------------------------------------------------------
-  const ACCESS_URL = 'https://savory-fly-917.eu-west-1.convex.site/access';
+  const ACCESS_URL = 'https://dashing-fish-54.eu-west-1.convex.site/access';
   // Build fingerprint: identifies an official -TheKraken- build.
   const BUILD_FP = 'kwr-65219bf17e59';
   // What the script manager says is installed (name / namespace / version),
@@ -11106,7 +11119,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
   // Proof of identity for the Kraken server. Your API key is sent ONCE to
   // /auth; the server asks Torn whose key it is, doesn't keep the key, and
   // returns a signed pass (valid 30 days) that every server feature checks.
-  const AUTH_URL = 'https://savory-fly-917.eu-west-1.convex.site/auth';
+  const AUTH_URL = 'https://dashing-fish-54.eu-west-1.convex.site/auth';
   const PASS_KEY = 'tws_pass_v1';
   let passInFlight = null;
   async function getPass(force) {
@@ -11378,7 +11391,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
   // talks to, so no extra permission). Before updating: an "Update available"
   // banner in the panel with the changes. After updating: a one-time
   // "What's new" card (covers silent background updates too).
-  const CHANGELOG_URL = 'https://savory-fly-917.eu-west-1.convex.site/changelog?track=live';
+  const CHANGELOG_URL = 'https://dashing-fish-54.eu-west-1.convex.site/changelog?track=live';
   const CL_CACHE = 'tws_cl_cache';
   const CL_SEEN = 'tws_cl_seen';
   const CL_LATER = 'tws_cl_later';
