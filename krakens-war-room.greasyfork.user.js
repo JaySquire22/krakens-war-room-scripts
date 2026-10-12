@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Krakens War Room 🐙
 // @namespace    jay-torn-war-script
-// @version      1.99.15
+// @version      1.99.17
 // @description  Ranked-war companion for Torn: live enemy roster with hospital timers, chain timers & alerts, attack/retal links, targets, attacks log, battle-stat estimates and a PC wide mode. Works in Tampermonkey and Torn PDA. 2-hour free trial, then 1 Xanax = 7 days.
 // @author       -TheKraken- [3616083]
 // @copyright    2026, -TheKraken- [3616083] - All rights reserved
@@ -531,7 +531,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.15';
+  const SCRIPT_VERSION = '1.99.17';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -1050,7 +1050,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
   // screen until a new war is matched. Kept (and saved) for 30 days.
   //   { ownId, ownName, enemyId, enemyName, endTime, winnerId }
   // ---------------------------------------------------------------------
-  const LAST_WAR_KEEP_SEC = 30 * 86400;
+  const LAST_WAR_KEEP_SEC = 365 * 86400; // kept until the next war is matched
   let lastWar = null;
   try {
     const raw = JSON.parse(getCfg(STORE_KEYS.lastWar, 'null'));
@@ -1092,7 +1092,9 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
   }
 
   function saveLastWarIfNewer(ended) {
-    if (!lastWar || ended.endTime > lastWar.endTime) {
+    // A war from a different faction (you moved) is always replaced, even if newer.
+    const otherFaction = lastWar && lastWar.ownId && ended.ownId && String(lastWar.ownId) !== String(ended.ownId);
+    if (!lastWar || otherFaction || ended.endTime > lastWar.endTime) {
       saveLastWar(ended);
       return;
     }
@@ -7514,18 +7516,32 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
   }
 
 
+  // Hospital (in Torn) or jail timer has hit zero -> they are out. Overseas
+  // hospital is left alone: they come out abroad, not attackable from Torn.
+  function timerOver(state, description, until, nowS) {
+    if (!until || nowS < until) return false;
+    if (state === 'Jail') return true;
+    if (state !== 'Hospital') return false;
+    try { if (COUNTRY_KEYWORDS.some(([re]) => re.test(description || ''))) return false; } catch (e) { return false; }
+    return true;
+  }
   function parseMembers__raw(data) {
     const now = Date.now() / 1000;
     return Object.entries(data.members || {}).map(([id, m]) => {
       const status = m.status || {};
       const lastAction = m.last_action || {};
       const until = status.until || 0;
+      let state = status.state || 'Okay';
+      let description = status.description || '';
+      // Torn's API can lag a few seconds behind the real release time: once the
+      // timer has run out, treat them as out straight away.
+      if (timerOver(state, description, until, now)) { state = 'Okay'; description = 'Okay'; }
       return {
         id,
         name: m.name,
         level: m.level,
-        state: status.state || 'Okay',
-        description: status.description || '',
+        state,
+        description,
         lastActionStatus: lastAction.status || 'Offline', // Online | Idle | Offline
         until,
         remaining: until ? Math.max(0, Math.round(until - now)) : 0,
@@ -8043,12 +8059,20 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
     const mode = perfMode();
     if (mode !== 'full' && document.visibilityState === 'hidden') return;
     const nowS = Date.now() / 1000;
-    const tick = (arr) => arr.map((m) => ({
-      ...m,
-      remaining: (mode !== 'full' && m.until)
-        ? Math.max(0, Math.round(m.until - nowS))
-        : (m.remaining > 0 ? Math.max(0, m.remaining - 1) : 0),
-    }));
+    let freedNow = false;
+    const tick = (arr) => arr.map((m) => {
+      // Timer hit zero: show them as out (green ATK) now, not at the next API poll.
+      if (timerOver(m.state, m.description, m.until, nowS)) {
+        freedNow = true;
+        return { ...m, state: 'Okay', description: 'Okay', until: 0, remaining: 0 };
+      }
+      return {
+        ...m,
+        remaining: (mode !== 'full' && m.until)
+          ? Math.max(0, Math.round(m.until - nowS))
+          : (m.remaining > 0 ? Math.max(0, m.remaining - 1) : 0),
+      };
+    });
     enemyMembers = tick(enemyMembers);
     homeMembers = tick(homeMembers);
     // Both chain timers are recomputed from what Torn reported at the last
@@ -8089,7 +8113,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
       refreshRespect();
     }
     // Wide mode: timers tick in place every second; full redraw every 5s.
-    if (mode === 'full' && (!wideActive() || perfTickCount % 5 === 0)) safeRender(); else updateInPlace();
+    if (freedNow || (mode === 'full' && (!wideActive() || perfTickCount % 5 === 0))) safeRender(); else updateInPlace();
     if (wideActive() && perfTickCount % 5 === 0) renderAtkLog();
   }
 
