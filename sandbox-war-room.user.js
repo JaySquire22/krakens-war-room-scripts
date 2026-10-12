@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Sandbox War Room 🧪
 // @namespace    jay-torn-war-script-sandbox
-// @version      1.99.17
+// @version      1.99.18
 // @downloadURL  https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @updateURL    https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @description  [SANDBOX - test build, not for general use] Enemy hospital timers, quick attack links, and a chain timeout alert overlay for Torn faction war pages. Works in Tampermonkey (Firefox) and Torn PDA.
@@ -529,7 +529,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.17';
+  const SCRIPT_VERSION = '1.99.18';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -7514,10 +7514,12 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
   }
 
 
-  // Hospital (in Torn) or jail timer has hit zero -> they are out. Overseas
-  // hospital is left alone: they come out abroad, not attackable from Torn.
+  // Hospital (in Torn) or jail timer is down to its last second -> show them as
+  // out (by the time the attack page loads, they are). Overseas hospital is
+  // left alone: they come out abroad, not attackable from Torn.
+  const TIMER_EARLY_SEC = 1;
   function timerOver(state, description, until, nowS) {
-    if (!until || nowS < until) return false;
+    if (!until || nowS < until - TIMER_EARLY_SEC) return false;
     if (state === 'Jail') return true;
     if (state !== 'Hospital') return false;
     try { if (COUNTRY_KEYWORDS.some(([re]) => re.test(description || ''))) return false; } catch (e) { return false; }
