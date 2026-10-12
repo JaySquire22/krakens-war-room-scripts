@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Krakens War Room 🐙
 // @namespace    jay-torn-war-script
-// @version      1.99.17
+// @version      1.99.18
 // @description  Ranked-war companion for Torn: live enemy roster with hospital timers, chain timers & alerts, attack/retal links, targets, attacks log, battle-stat estimates and a PC wide mode. Works in Tampermonkey and Torn PDA. 2-hour free trial, then 1 Xanax = 7 days.
 // @author       -TheKraken- [3616083]
 // @copyright    2026, -TheKraken- [3616083] - All rights reserved
@@ -531,7 +531,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.17';
+  const SCRIPT_VERSION = '1.99.18';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -7516,10 +7516,12 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
   }
 
 
-  // Hospital (in Torn) or jail timer has hit zero -> they are out. Overseas
-  // hospital is left alone: they come out abroad, not attackable from Torn.
+  // Hospital (in Torn) or jail timer is down to its last second -> show them as
+  // out (by the time the attack page loads, they are). Overseas hospital is
+  // left alone: they come out abroad, not attackable from Torn.
+  const TIMER_EARLY_SEC = 1;
   function timerOver(state, description, until, nowS) {
-    if (!until || nowS < until) return false;
+    if (!until || nowS < until - TIMER_EARLY_SEC) return false;
     if (state === 'Jail') return true;
     if (state !== 'Hospital') return false;
     try { if (COUNTRY_KEYWORDS.some(([re]) => re.test(description || ''))) return false; } catch (e) { return false; }
