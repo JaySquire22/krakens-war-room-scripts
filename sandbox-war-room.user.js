@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Sandbox War Room 🧪
 // @namespace    jay-torn-war-script-sandbox
-// @version      1.99.16
+// @version      1.99.17
 // @downloadURL  https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @updateURL    https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @description  [SANDBOX - test build, not for general use] Enemy hospital timers, quick attack links, and a chain timeout alert overlay for Torn faction war pages. Works in Tampermonkey (Firefox) and Torn PDA.
@@ -529,7 +529,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.16';
+  const SCRIPT_VERSION = '1.99.17';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -1048,7 +1048,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
   // screen until a new war is matched. Kept (and saved) for 30 days.
   //   { ownId, ownName, enemyId, enemyName, endTime, winnerId }
   // ---------------------------------------------------------------------
-  const LAST_WAR_KEEP_SEC = 30 * 86400;
+  const LAST_WAR_KEEP_SEC = 365 * 86400; // kept until the next war is matched
   let lastWar = null;
   try {
     const raw = JSON.parse(getCfg(STORE_KEYS.lastWar, 'null'));
@@ -1090,7 +1090,9 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
   }
 
   function saveLastWarIfNewer(ended) {
-    if (!lastWar || ended.endTime > lastWar.endTime) {
+    // A war from a different faction (you moved) is always replaced, even if newer.
+    const otherFaction = lastWar && lastWar.ownId && ended.ownId && String(lastWar.ownId) !== String(ended.ownId);
+    if (!lastWar || otherFaction || ended.endTime > lastWar.endTime) {
       saveLastWar(ended);
       return;
     }
