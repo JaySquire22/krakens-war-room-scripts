@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PC War Room 🖥️ (trial)
 // @namespace    jay-torn-war-script-pcwide
-// @version      1.2.3
+// @version      1.2.4
 // @downloadURL  https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/pc-war-room.user.js
 // @updateURL    https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/pc-war-room.user.js
 // @description  [PC TRIAL - built from Sandbox build 1.85.9] Wide PC layout: Enemy | Home | Attacks log side by side. Run INSTEAD of War Room / the sandbox, not alongside.
@@ -236,7 +236,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.2.3';
+  const SCRIPT_VERSION = '1.2.4';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -5638,10 +5638,12 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
   }
 
 
-  // Hospital (in Torn) or jail timer has hit zero -> they are out. Overseas
-  // hospital is left alone: they come out abroad, not attackable from Torn.
+  // Hospital (in Torn) or jail timer is down to its last second -> show them as
+  // out (by the time the attack page loads, they are). Overseas hospital is
+  // left alone: they come out abroad, not attackable from Torn.
+  const TIMER_EARLY_SEC = 1;
   function timerOver(state, description, until, nowS) {
-    if (!until || nowS < until) return false;
+    if (!until || nowS < until - TIMER_EARLY_SEC) return false;
     if (state === 'Jail') return true;
     if (state !== 'Hospital') return false;
     try { if (COUNTRY_KEYWORDS.some(([re]) => re.test(description || ''))) return false; } catch (e) { return false; }
