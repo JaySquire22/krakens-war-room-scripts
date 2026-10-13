@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Krakens War Room 🐙
 // @namespace    jay-torn-war-script
-// @version      1.99.18
+// @version      1.99.19
 // @description  Ranked-war companion for Torn: live enemy roster with hospital timers, chain timers & alerts, attack/retal links, targets, attacks log, battle-stat estimates and a PC wide mode. Works in Tampermonkey and Torn PDA. 2-hour free trial, then 1 Xanax = 7 days.
 // @author       -TheKraken- [3616083]
 // @copyright    2026, -TheKraken- [3616083] - All rights reserved
@@ -531,7 +531,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.18';
+  const SCRIPT_VERSION = '1.99.19';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -1418,7 +1418,22 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
       const key = String(aid);
       if (!map[key] || ended > map[key]) map[key] = ended;
     });
+    // A faction mate putting them in hospital after their hit uses up the retal.
+    attacks.forEach((a) => {
+      const atkF = (a.attacker && a.attacker.faction) ? a.attacker.faction.id : a.attacker_faction;
+      const defF = (a.defender && a.defender.faction) ? a.defender.faction.id : a.defender_faction;
+      if (String(atkF) !== String(ownId) || String(defF) !== String(enemyId)) return;
+      if (!isHospHit(a)) return;
+      const did = String(a.defender ? a.defender.id : a.defender_id);
+      const ended = atkEnded(a);
+      if (map[did] && ended >= map[did]) delete map[did];
+    });
     return map;
+  }
+  // Only a hospitalisation counts as taking the retal.
+  function isHospHit(a) {
+    const r = String(a.result || (a.attacker && a.attacker.result) || '');
+    return /^hospitali[sz]ed$/i.test(r);
   }
 
   // The server's compact attack records, in the shape buildRetalMap reads.
@@ -1916,7 +1931,10 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
   }
   function atkLogIsRetal(x, ownId, nowS) {
     return !!ownId && String(x.dF) === ownId && String(x.aF) !== ownId && x.aId > 0
-      && attackSucceeded({ result: x.r }) && (nowS - x.e) <= RETAL_WINDOW_SEC;
+      && attackSucceeded({ result: x.r }) && (nowS - x.e) <= RETAL_WINDOW_SEC
+      // not once a faction mate has hospitalised that attacker since
+      && !loadAtkLog().some((y) => String(y.aF) === ownId && String(y.dId) === String(x.aId)
+        && y.e >= x.e && isHospHit({ result: y.r }));
   }
   function atkLogSignature() {
     const ownId = String(getOwnFactionId() || '');
