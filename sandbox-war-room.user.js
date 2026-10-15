@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Sandbox War Room 🧪
 // @namespace    jay-torn-war-script-sandbox
-// @version      1.99.21
+// @version      1.99.22
 // @downloadURL  https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @updateURL    https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @description  [SANDBOX - test build, not for general use] Enemy hospital timers, quick attack links, and a chain timeout alert overlay for Torn faction war pages. Works in Tampermonkey (Firefox) and Torn PDA.
@@ -529,7 +529,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.21';
+  const SCRIPT_VERSION = '1.99.22';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -3017,7 +3017,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
   // [stars needed, special, what it means for you, 'key' = changes how you fight them]
   const KI_JOB_PERKS = {
     36: ['Ladies Strip Club', [[3, 'Hench', '+25% passive defence', 'key'], [5, 'Hormonal', '+50% Serotonin effect', 'info'], [10, 'Hardbody', '30% less melee damage taken', 'key']]],
-    26: ['Gents Strip Club', [[3, 'Dancer’s Flair', '+25% passive dexterity', 'key'], [5, 'Supple', '+50% Tyrosine effect', 'info'], [10, 'No Touching', '25% chance to dodge melee', 'key']]],
+    26: ['Gents Strip Club', [[3, 'Dancer\u2019s Flair', '+25% passive dexterity', 'key'], [5, 'Supple', '+50% Tyrosine effect', 'info'], [10, 'No Touching', '25% chance to dodge melee', 'key']]],
     5: ['Clothing Store', [[5, 'Activewear', '+25% passive dexterity', 'key'], [10, 'Tailoring', '+20% armour mitigation', 'key']]],
     37: ['Private Security Firm', [[3, 'Tactical Breach', '+50% flash grenade intensity', 'info'], [7, 'Regulation', '+25% full armour set bonus', 'key']]],
     10: ['Adult Novelties', [[7, 'Bondage', 'your speed is cut by 25%', 'key']]],
@@ -3029,7 +3029,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
     6: ['Gun Shop', [[5, 'Skilled Analysis', 'always sees your loadout', 'info'], [7, 'Bandoleer', 'an extra clip for guns', 'info'], [10, 'Firearms Expert', '+10% gun damage', 'info']]],
     4: ['Car Dealership', [[10, 'Getaway Car', 'can always escape', 'info']]],
     18: ['Zoo', [[10, 'Seasoned Poacher', '+3 accuracy', 'info']]],
-    1: ['Hair Salon', [[5, 'Rumors', 'reduces your stealth', 'info'], [10, 'Sweeney’s Revenge', '+20% slashing weapon damage', 'info']]],
+    1: ['Hair Salon', [[5, 'Rumors', 'reduces your stealth', 'info'], [10, 'Sweeney\u2019s Revenge', '+20% slashing weapon damage', 'info']]],
     25: ['Pub', [[3, 'Drunken Master', '+10% melee damage', 'info']]],
     27: ['Restaurant', [[3, 'Butcher', '+10% melee damage', 'info']]],
     19: ['Firework Stand', [[5, 'Pyromania', 'stronger flamethrower', 'info']]],
@@ -9594,7 +9594,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
         <div style="color:#888;font-size:11px;margin:0 0 8px;">${IS_PDA ? 'PC Mode is for desktop browsers (not Torn PDA).' : pcMode() ? 'PC Mode is on: Enemy | Home | Targets + Attacks log side by side when the window is at least 1100px wide.' : 'Wide desktop layout: Enemy | Home | Targets + Attacks log side by side (windows 1100px+). Saved on this device.'}</div>
         <button id="tws-adv-bounty" style="margin-bottom:8px;">💰 Bounty amounts ›</button>
         <div class="tws-adv-group" style="margin-top:0;">🐙 Kraken Intel</div>
-        <div style="color:#888;font-size:11px;margin:2px 0 8px;">Loadouts Torn reveals on attack pages you view are shared with other contributors when “Share loadouts” below is on. Your Torn API key stays on this device and is never uploaded with shared intel.</div>
+        <div style="color:#888;font-size:11px;margin:2px 0 8px;">Loadouts Torn reveals on attack pages you view are shared with other contributors when \u201cShare loadouts\u201d below is on. Your Torn API key stays on this device and is never uploaded with shared intel.</div>
         <button id="tws-ki-clear-captures" style="margin-bottom:6px;">🐙 Clear cached observations</button>
         <button id="tws-ki-clear-items" style="margin-bottom:10px;">🐙 Clear cached item details</button>
         ${true ? `
@@ -10656,7 +10656,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
             <span data-v="friends" class="${getRevives() === 'friends' ? 'tws-tri-friends' : ''}">Friends</span>
             <span data-v="on" class="${getRevives() === 'on' ? 'tws-tri-on' : ''}">On</span>
           </div>
-          <div style="color:#888;font-size:10px;margin:0 0 8px;">Tap Off, Friends or On: Torn’s Preferences opens in the pop-out with that option outlined – pick it and press Torn’s Update button (Torn’s rules don’t allow scripts to change it for you). Greys out the Rev button when Off.</div>
+          <div style="color:#888;font-size:10px;margin:0 0 8px;">Tap Off, Friends or On: Torn\u2019s Preferences opens in the pop-out with that option outlined – pick it and press Torn\u2019s Update button (Torn\u2019s rules don\u2019t allow scripts to change it for you). Greys out the Rev button when Off.</div>
           ${'Sandbox War Room'.indexOf('Sandbox') === 0 ? `<label style="display:flex;align-items:center;gap:6px;margin-bottom:8px;cursor:pointer;"><input type="checkbox" id="tws-in-analytics" style="width:auto;margin:0;" ${featureOn('perfMonitor') ? 'checked' : ''}> \ud83d\udcc8 Analytics bar (performance monitor, bottom-left)</label>` : ''}
           <label>Revive service (Rev button)</label>
           <select id="tws-in-revprov">
