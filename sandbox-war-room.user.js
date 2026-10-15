@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Sandbox War Room 🧪
 // @namespace    jay-torn-war-script-sandbox
-// @version      1.99.19
+// @version      1.99.20
 // @downloadURL  https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @updateURL    https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @description  [SANDBOX - test build, not for general use] Enemy hospital timers, quick attack links, and a chain timeout alert overlay for Torn faction war pages. Works in Tampermonkey (Firefox) and Torn PDA.
@@ -529,7 +529,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.19';
+  const SCRIPT_VERSION = '1.99.20';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -2515,9 +2515,10 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
 
   async function kiEnrichCaptureWithTornApi(capture) {
     if (!capture || !capture.items || !getKrakenIntelTornApiKey()) return capture;
-    const armourItems = capture.items.filter((i) => kiIsArmourSlot(i) && kiPositiveInteger(i.armoury_id));
-    if (!armourItems.length) return capture;
-    const details = await kiFetchUniqueItemDetails(armourItems.map((i) => i.armoury_id));
+    // Armour and weapons: rarity (yellow / orange / red), quality, bonuses.
+    const lookItems = capture.items.filter((i) => i && i.item_id !== 999 && KI_COMBAT_SLOTS.has(Number(i.equip_slot)) && kiPositiveInteger(i.armoury_id));
+    if (!lookItems.length) return capture;
+    const details = await kiFetchUniqueItemDetails(lookItems.map((i) => i.armoury_id));
     if (!details.size) return capture;
     return {
       ...capture,
@@ -2526,7 +2527,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
         if (!d) return item;
         return {
           ...item,
-          armour: d.armour != null ? d.armour : item.armour,
+          armour: (kiIsArmourSlot(item) && d.armour != null) ? d.armour : item.armour,
           quality: d.quality != null ? d.quality : item.quality,
           rarity: d.rarity || item.rarity,
           bonuses: (d.bonuses && d.bonuses.length) ? d.bonuses : item.bonuses,
@@ -3011,6 +3012,109 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
   }
   let kiTempToastFor = null;
 
+  // Item rarity colour (yellow / orange / red) from the intel, if Torn gave it.
+  function kiRarityOf(item) {
+    const r = String((item && item.rarity) || '').toLowerCase().match(/yellow|orange|red/);
+    if (r) return r[0];
+    try {
+      const raw = JSON.stringify((item && item.raw_source) || {}).toLowerCase();
+      const m = raw.match(/glow[-_ ]?(yellow|orange|red)|"(?:rarity|glow|glowclass|colou?r)"\s*:\s*"[^"]*?(yellow|orange|red)/);
+      if (m) return m[1] || m[2];
+    } catch (e) { /* ignore */ }
+    return null;
+  }
+  function kiBonusChips(item) {
+    const rar = kiRarityOf(item);
+    return (Array.isArray(item.bonuses) ? item.bonuses : []).map((b) => {
+      const chip = document.createElement('span');
+      chip.className = `tws-ki-chip${rar ? ` is-${rar}` : ''}`;
+      chip.textContent = b.value == null ? b.name : `${b.value}% ${b.name}`;
+      return chip;
+    });
+  }
+
+  // ---- Attack page: temporary warning (flash, then a small tab) ----
+  let kiTempFlashFor = null;
+  const kiRarityAsked = new Set();
+  function kiTempPopEl(w, extra) {
+    const el = document.createElement('div');
+    el.className = `tws-ki-temp-pop ${extra || ''}`.trim();
+    const head = document.createElement('div');
+    head.className = 'tws-ki-temp-pop-head';
+    head.textContent = '⚠ Temporary warning';
+    el.appendChild(head);
+    kiTempWarnLines(w).forEach((l) => {
+      const row = document.createElement('div');
+      row.className = `tws-ki-temp-pop-${l.cls}`;
+      row.textContent = l.text;
+      el.appendChild(row);
+    });
+    return el;
+  }
+  function kiShowTempWarnUI(w, avatar) {
+    const mine = kiAttackerTempName();
+    const tempWrap = mine.wrap || kiAttackerWeaponWrapper(5);
+    const hard = !!(mine.name && w.blocked[mine.name]);
+    const soft = !hard && !!(mine.name && w.reduced.includes(mine.name));
+    if (tempWrap && (hard || soft)) tempWrap.classList.add(hard ? 'tws-ki-temp-bad' : 'tws-ki-temp-warn');
+    const sev = (hard || (!soft && w.blocks.length)) ? 'is-block' : 'is-reduce';
+    const tab = document.createElement('div');
+    tab.className = `tws-ki-temp-tab ${sev}`;
+    tab.textContent = '⚠';
+    tab.setAttribute('role', 'button');
+    tab.setAttribute('aria-label', 'Temporary warning');
+    const sx = window.scrollX || 0;
+    const sy = window.scrollY || 0;
+    const r = (tempWrap || avatar).getBoundingClientRect();
+    if (tempWrap) {
+      tab.style.left = `${Math.round(r.right + sx + 2)}px`;
+      tab.style.top = `${Math.round(r.top + sy + r.height / 2 - 13)}px`;
+    } else {
+      tab.style.left = `${Math.round(r.left + sx + 4)}px`;
+      tab.style.top = `${Math.round(r.top + sy + 4)}px`;
+    }
+    document.body.appendChild(tab);
+    tab.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); kiToggleTempPop(w, tab); });
+    const key = `${kiState.latest && kiState.latest.target_id}|${kiTempWarnLines(w).map((l) => l.text).join('|')}`;
+    if (kiTempFlashFor !== key) { kiTempFlashFor = key; kiFlashTempWarn(w, avatar, tab); }
+  }
+  function kiFlashTempWarn(w, avatar, tab) {
+    document.querySelectorAll('.tws-ki-temp-flash').forEach((n) => n.remove());
+    const el = kiTempPopEl(w, 'tws-ki-temp-flash');
+    document.body.appendChild(el);
+    const sx = window.scrollX || 0;
+    const sy = window.scrollY || 0;
+    const ar = avatar.getBoundingClientRect();
+    const er = el.getBoundingClientRect();
+    el.style.left = `${Math.round(Math.max(sx + 6, ar.left + sx + ar.width / 2 - er.width / 2))}px`;
+    el.style.top = `${Math.round(Math.max(sy + 6, ar.top + sy + ar.height * 0.45 - er.height / 2))}px`;
+    setTimeout(() => {
+      if (!el.isConnected) return;
+      const live = document.querySelector('.tws-ki-temp-tab') || tab;
+      const tr = live.getBoundingClientRect();
+      const e2 = el.getBoundingClientRect();
+      if (tr.width) el.style.transform = `translate(${Math.round(tr.left + tr.width / 2 - (e2.left + e2.width / 2))}px, ${Math.round(tr.top + tr.height / 2 - (e2.top + e2.height / 2))}px) scale(0.12)`;
+      el.style.opacity = '0';
+      setTimeout(() => el.remove(), 420);
+    }, 1600);
+  }
+  function kiToggleTempPop(w, tab) {
+    const old = document.querySelector('.tws-ki-temp-open');
+    if (old) { old.remove(); return; }
+    const el = kiTempPopEl(w, 'tws-ki-temp-open');
+    document.body.appendChild(el);
+    const sx = window.scrollX || 0;
+    const sy = window.scrollY || 0;
+    const tr = tab.getBoundingClientRect();
+    const er = el.getBoundingClientRect();
+    let left = tr.right + sx + 4;
+    if (left + er.width > sx + window.innerWidth - 6) left = Math.max(sx + 6, tr.left + sx - er.width - 4);
+    el.style.left = `${Math.round(left)}px`;
+    el.style.top = `${Math.round(Math.max(sy + 4, tr.top + sy + tr.height / 2 - er.height / 2))}px`;
+    el.addEventListener('click', () => el.remove());
+    setTimeout(() => { if (el.isConnected) el.remove(); }, 5000);
+  }
+
   function kiRenderProfilePanel() {
     try { kiProfileTopWarn(); } catch (e) { /* ignore */ }
     if (!kiView.body) return;
@@ -3055,15 +3159,21 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
     meta.append(identity, badge);
     kiView.body.appendChild(meta);
 
-    const list = document.createElement('div');
-    list.className = 'tws-ki-list';
-    kiState.latest.items.forEach((item) => {
-      if (item.item_id === 999) return;
+    const items = kiState.latest.items.filter((i) => i && i.item_id !== 999);
+    const bySlot = (n) => items.find((i) => Number(i.equip_slot) === n) || null;
+    // Missing rarity (older / shared intel): one Torn API lookup per player.
+    const tid = kiState.latest.target_id;
+    if (!kiRarityAsked.has(tid) && items.some((i) => !kiRarityOf(i) && kiPositiveInteger(i.armoury_id))) {
+      kiRarityAsked.add(tid);
+      kiRefreshLatestArmourDetails().then(() => { try { kiRenderProfilePanel(); } catch (e) { /* ignore */ } }).catch(() => {});
+    }
+    const makeRow = (slotNo, item) => {
       const row = document.createElement('div');
-      row.className = 'tws-ki-row';
+      const rar = item ? kiRarityOf(item) : null;
+      row.className = `tws-ki-row${rar ? ` is-${rar}` : ''}${item ? '' : ' is-empty'}`;
       const imageWrap = document.createElement('span');
       imageWrap.className = 'tws-ki-image-wrap';
-      const imageUrl = item.image_url || (item.item_id ? `https://www.torn.com/images/items/${item.item_id}/large.png` : null);
+      const imageUrl = item && (item.image_url || (item.item_id ? `https://www.torn.com/images/items/${item.item_id}/large.png` : null));
       if (imageUrl) {
         const image = document.createElement('img');
         image.className = 'tws-ki-image';
@@ -3075,20 +3185,49 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
       } else {
         imageWrap.classList.add('is-missing');
       }
-      const slot = document.createElement('span');
-      slot.className = 'tws-ki-slot';
-      slot.textContent = KI_COMBAT_SLOTS.get(Number(item.equip_slot)) || item.slot_name || 'Item';
       const content = document.createElement('span');
       content.className = 'tws-ki-item';
+      const top = document.createElement('span');
+      top.className = 'tws-ki-top';
       const name = document.createElement('strong');
-      name.textContent = item.name;
+      name.textContent = item ? item.name : 'Unknown';
+      top.appendChild(name);
+      if (item) kiBonusChips(item).forEach((c) => top.appendChild(c));
       const details = document.createElement('small');
-      details.textContent = kiItemSummary(item) || (kiIsArmourSlot(item) ? 'Rating, quality and bonuses not exposed by Torn' : 'No additional details supplied');
-      content.append(name, details);
-      row.append(imageWrap, slot, content);
-      list.appendChild(row);
+      const slotName = KI_COMBAT_SLOTS.get(slotNo) || 'Item';
+      const bits = [slotName];
+      if (item) {
+        if (kiIsArmourSlot(item)) {
+          const arm = kiFmt2(item.armour);
+          if (arm !== null) bits.push(`ARM ${arm}`);
+          const nm = String(item.name || '').toLowerCase();
+          const blk = KI_TEMP_BLOCKS.find(([k]) => nm.includes(k));
+          if (blk) bits.push(`Blocks: ${kiListTemps(blk[1])}`);
+        } else {
+          const dmg = kiFmt2(item.damage);
+          const acc = kiFmt2(item.accuracy);
+          if (dmg !== null) bits.push(`DMG ${dmg}`);
+          if (acc !== null) bits.push(`ACC ${acc}`);
+        }
+      }
+      details.textContent = bits.join(' · ');
+      content.append(top, details);
+      row.append(imageWrap, content);
+      return row;
+    };
+    const cols = document.createElement('div');
+    cols.className = 'tws-ki-cols';
+    [['Weapons', [1, 2, 3, 5]], ['Armour', [6, 4, 7, 8, 9]]].forEach(([title, slots]) => {
+      const col = document.createElement('div');
+      col.className = 'tws-ki-col';
+      const h = document.createElement('div');
+      h.className = 'tws-ki-col-head';
+      h.textContent = title;
+      col.appendChild(h);
+      slots.forEach((n) => col.appendChild(makeRow(n, bySlot(n))));
+      cols.appendChild(col);
     });
-    kiView.body.appendChild(list);
+    kiView.body.appendChild(cols);
 
     const note = document.createElement('div');
     note.className = 'tws-ki-note';
@@ -3369,7 +3508,8 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
 
   function kiRenderAttackEquipment__raw() {
     kiView.attackFrame = null;
-    document.querySelectorAll('.tws-ki-enemy-weapons-layer,.tws-ki-armour-dot,.tws-ki-tempwarn-attack,.tws-ki-temp-mark').forEach((n) => n.remove());
+    document.querySelectorAll('.tws-ki-enemy-weapons-layer,.tws-ki-armour-dot,.tws-ki-tempwarn-attack,.tws-ki-temp-mark,.tws-ki-temp-tab').forEach((n) => n.remove());
+    document.querySelectorAll('.tws-ki-temp-bad,.tws-ki-temp-warn').forEach((n) => n.classList.remove('tws-ki-temp-bad', 'tws-ki-temp-warn'));
     document.querySelectorAll('.tws-ki-attack-avatar-host').forEach((n) => n.classList.remove('tws-ki-attack-avatar-host'));
     document.documentElement.classList.toggle('tws-ki-loadout-revealed', kiPageDetails().type === 'attack' && !!(featureOn('kiShowIntel') && kiState.latest));
     if (kiPageDetails().type !== 'attack' || !featureOn('kiShowIntel') || !kiState.latest || !kiState.latest.items) {
@@ -3388,25 +3528,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
       if (pcMode()) { kiTagDefenderSlots(avatar); kiInstallHoverStats(); }
       if (featureOn('kiTempWarn')) {
         const w = kiTempWarnings(kiState.latest.items);
-        if (w.any) {
-          avatar.appendChild(kiTempWarnEl(w, 'tws-ki-tempwarn-big tws-ki-tempwarn-attack'));
-          // Your own Temporary slot: marked when it won't work / may not.
-          const mine = kiAttackerTempName();
-          if (mine.wrap && mine.name && (w.blocked[mine.name] || w.reduced.includes(mine.name))) {
-            const tag = document.createElement('div');
-            const hard = !!w.blocked[mine.name];
-            tag.className = `tws-ki-temp-mark ${hard ? 'is-block' : 'is-reduce'}`;
-            tag.textContent = hard ? `\u26d4 BLOCKED by ${w.blocked[mine.name]}` : '\u26a0 May be ineffective (Delta)';
-            mine.wrap.classList.add('tws-ki-temp-host');
-            mine.wrap.appendChild(tag);
-          }
-          // A pop-up once per fight page, so it can't be missed.
-          const key = `${kiState.latest.target_id}|${kiTempWarnLines(w).map((l) => l.text).join('|')}`;
-          if (kiTempToastFor !== key) {
-            kiTempToastFor = key;
-            try { showToast(`\u26a0 ${kiTempWarnLines(w).map((l) => l.text).join('  \u00b7  ')}`, { duration: 12000, error: true }); } catch (e) { /* ignore */ }
-          }
-        }
+        if (w.any) kiShowTempWarnUI(w, avatar);
       }
       // Mobile Mode: weapons are shown in the ENEMY fold-out tab instead of
       // floating labels around the model.
@@ -3467,7 +3589,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
     if (kiView.attackObserver || !document.body) return;
     kiView.attackObserver = PerfMO('kiObserveAttackLayout observer', (records) => {
       const changed = records.some((r) => Array.from(r.addedNodes).concat(Array.from(r.removedNodes)).some((n) =>
-        !(n instanceof Element) || !n.matches || !n.matches('.tws-ki-enemy-weapons-layer, .tws-ki-armour-dot, .tws-ki-tempwarn-attack, .tws-ki-temp-mark')
+        !(n instanceof Element) || !n.matches || !n.matches('.tws-ki-enemy-weapons-layer, .tws-ki-armour-dot, .tws-ki-tempwarn-attack, .tws-ki-temp-mark, .tws-ki-temp-tab, .tws-ki-temp-pop')
       ));
       if (changed) kiScheduleAttackEquipmentRender();
     });
@@ -3653,8 +3775,9 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
     if (!item) return `<div class="tws-ew-box tws-ew-empty"><div class="tws-ew-slot">${slotName}</div><div class="tws-ew-none">Unknown</div></div>`;
     const dmg = kiFmt2(item.damage);
     const acc = kiFmt2(item.accuracy);
-    const bon = (Array.isArray(item.bonuses) ? item.bonuses : []).map((b) => `<span class="tws-ew-bonus">${kiEsc(b.name)}${b.value == null ? '' : ` ${kiEsc(b.value)}%`}</span>`).join('');
-    const rar = item.rarity ? ` tws-ew-${kiEsc(String(item.rarity).toLowerCase())}` : '';
+    const rarC = kiRarityOf(item);
+    const bon = (Array.isArray(item.bonuses) ? item.bonuses : []).map((b) => `<span class="tws-ew-bonus${rarC ? ` is-${rarC}` : ''}">${kiEsc(b.name)}${b.value == null ? '' : ` ${kiEsc(b.value)}%`}</span>`).join('');
+    const rar = kiRarityOf(item) ? ` tws-ew-${kiRarityOf(item)}` : '';
     return `<div class="tws-ew-box${rar}">
       <div class="tws-ew-slot">${slotName}</div>
       ${item.image_url ? `<img class="tws-ew-img" src="${kiEsc(item.image_url)}" alt="">` : ''}
@@ -8782,6 +8905,9 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
     #tws-ew-drawer .tws-ew-stats b { color: #ffb4b4; }
     #tws-ew-drawer .tws-ew-bonuses { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 3px; justify-content: center; }
     #tws-ew-drawer .tws-ew-bonus { background: #5a3a1e; color: #ffd9a8; border-radius: 9px; padding: 1px 6px; font-size: 10px; }
+    #tws-ew-drawer .tws-ew-bonus.is-yellow { background: rgba(232, 212, 77, .2); color: #f2e27a; border: 1px solid rgba(232, 212, 77, .6); }
+    #tws-ew-drawer .tws-ew-bonus.is-orange { background: rgba(240, 147, 43, .2); color: #ffb35c; border: 1px solid rgba(240, 147, 43, .65); }
+    #tws-ew-drawer .tws-ew-bonus.is-red { background: rgba(232, 65, 60, .2); color: #ff7a74; border: 1px solid rgba(232, 65, 60, .65); }
     #tws-ew-drawer .tws-ew-empty .tws-ew-none { color: #777; padding: 10px 0; }
     #tws-ew-drawer .tws-ew-sub { margin: 10px 0 4px; color: #9a9a9a; font-size: 10px; text-transform: uppercase; letter-spacing: 1px; }
     #tws-ew-drawer .tws-ew-arm { padding: 4px 0; border-top: 1px solid #333; }
@@ -8936,10 +9062,10 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
     #tws-ki-panel .tws-ki-confidence.is-stale, #tws-ki-panel .tws-ki-confidence.is-unknown { background: #879397; }
     #tws-ki-panel .tws-ki-row {
       display: grid;
-      grid-template-columns: 52px 72px minmax(0,1fr);
+      grid-template-columns: 44px minmax(0,1fr);
       align-items: center;
       gap: 7px;
-      padding: 7px 10px;
+      padding: 4px 8px;
       border-top: 1px solid var(--panel-divider-outer-side-color,#555);
     }
     #tws-ki-panel .tws-ki-image-wrap { display: flex; width: 50px; height: 34px; align-items: center; justify-content: center; border-radius: 5px; background: #ffffff0b; overflow: hidden; }
@@ -8947,6 +9073,22 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
     #tws-ki-panel .tws-ki-image-wrap.is-missing .tws-ki-image { display: none; }
     #tws-ki-panel .tws-ki-image { display: block; max-width: 50px; max-height: 34px; object-fit: contain; }
     #tws-ki-panel .tws-ki-slot { color: var(--default-blue-color,#71b6d7); font-weight: bold; }
+    #tws-ki-panel .tws-ki-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); }
+    #tws-ki-panel .tws-ki-col { min-width: 0; }
+    #tws-ki-panel .tws-ki-col + .tws-ki-col { border-left: 1px solid var(--panel-divider-outer-side-color,#555); }
+    #tws-ki-panel .tws-ki-col-head { padding: 3px 8px; font-size: 10px; font-weight: bold; letter-spacing: .5px; text-transform: uppercase; color: #9a9a9a; border-top: 1px solid var(--panel-divider-outer-side-color,#555); }
+    #tws-ki-panel .tws-ki-image-wrap { width: 44px !important; height: 28px !important; }
+    #tws-ki-panel .tws-ki-image { max-width: 44px !important; max-height: 28px !important; }
+    #tws-ki-panel .tws-ki-row.is-yellow .tws-ki-image-wrap { background: rgba(232, 212, 77, .22); box-shadow: inset 0 0 0 1px rgba(232, 212, 77, .6); }
+    #tws-ki-panel .tws-ki-row.is-orange .tws-ki-image-wrap { background: rgba(240, 147, 43, .24); box-shadow: inset 0 0 0 1px rgba(240, 147, 43, .65); }
+    #tws-ki-panel .tws-ki-row.is-red .tws-ki-image-wrap { background: rgba(232, 65, 60, .24); box-shadow: inset 0 0 0 1px rgba(232, 65, 60, .65); }
+    #tws-ki-panel .tws-ki-row.is-empty { opacity: .45; }
+    #tws-ki-panel .tws-ki-top { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; }
+    #tws-ki-panel .tws-ki-top strong { margin-right: 2px; }
+    .tws-ki-chip { display: inline-block; padding: 0 6px; border-radius: 8px; font-size: 10px; font-weight: bold; line-height: 16px; white-space: nowrap; background: #444; color: #ddd; }
+    .tws-ki-chip.is-yellow { background: rgba(232, 212, 77, .2); color: #f2e27a; border: 1px solid rgba(232, 212, 77, .6); }
+    .tws-ki-chip.is-orange { background: rgba(240, 147, 43, .2); color: #ffb35c; border: 1px solid rgba(240, 147, 43, .65); }
+    .tws-ki-chip.is-red { background: rgba(232, 65, 60, .2); color: #ff7a74; border: 1px solid rgba(232, 65, 60, .65); }
     #tws-ki-panel .tws-ki-item { display: flex; min-width: 0; flex-direction: column;
       overflow: hidden; }
     #tws-ki-panel .tws-ki-item strong { white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
@@ -8988,6 +9130,16 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
     .tws-ki-tempwarn-attack { position: absolute; left: 50%; top: 6px; transform: translateX(-50%); z-index: 30; width: max-content; max-width: 92%; margin: 0; text-align: center; box-shadow: 0 3px 10px rgba(0,0,0,.6); }
     @keyframes tws-ki-warn-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(255,77,77,.0); } 50% { box-shadow: 0 0 0 6px rgba(255,77,77,.55); } }
     .tws-ki-temp-host { position: relative !important; }
+    .tws-ki-temp-bad { outline: 2px solid #ff4d4d !important; outline-offset: -2px; }
+    .tws-ki-temp-warn { outline: 2px solid #ffb84d !important; outline-offset: -2px; }
+    .tws-ki-temp-tab { position: absolute; z-index: 2147482990; width: 22px; height: 26px; display: flex; align-items: center; justify-content: center; border-radius: 0 6px 6px 0; font: bold 13px Arial, sans-serif; color: #fff; cursor: pointer; box-shadow: 0 1px 4px rgba(0,0,0,.6); user-select: none; }
+    .tws-ki-temp-tab.is-block { background: #b3261e; border: 1px solid #ff6b6b; }
+    .tws-ki-temp-tab.is-reduce { background: #9a6200; border: 1px solid #ffb84d; }
+    .tws-ki-temp-pop { position: absolute; z-index: 2147482995; max-width: min(300px, 78vw); padding: 5px 9px; border-radius: 6px; background: rgba(60, 12, 12, .94); border: 1px solid #ff4d4d; color: #ffd0d0; font: bold 11px/1.4 Arial, sans-serif; box-shadow: 0 3px 10px rgba(0,0,0,.6); }
+    .tws-ki-temp-pop-head { color: #ffcf4d; font-size: 11px; letter-spacing: .3px; }
+    .tws-ki-temp-pop-reduce { color: #ffd98a; }
+    .tws-ki-temp-flash { pointer-events: none; transition: transform .38s ease-in, opacity .38s ease-in; transform-origin: center; }
+    .tws-ki-temp-open { cursor: pointer; }
     .tws-ki-temp-mark { position: absolute; left: 0; right: 0; top: 0; bottom: 0; z-index: 20; display: flex; align-items: center; justify-content: center; text-align: center; padding: 4px; font: bold 12px/1.3 Arial, sans-serif; color: #fff; pointer-events: none; }
     .tws-ki-temp-mark.is-block { background: rgba(160, 20, 20, 0.72); border: 2px solid #ff4d4d; }
     .tws-ki-temp-mark.is-reduce { background: rgba(140, 90, 0, 0.6); border: 2px solid #ffb84d; }
