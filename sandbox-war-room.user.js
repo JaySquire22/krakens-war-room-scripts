@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Sandbox War Room 🧪
 // @namespace    jay-torn-war-script-sandbox
-// @version      1.99.20
+// @version      1.99.21
 // @downloadURL  https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @updateURL    https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @description  [SANDBOX - test build, not for general use] Enemy hospital timers, quick attack links, and a chain timeout alert overlay for Torn faction war pages. Works in Tampermonkey (Firefox) and Torn PDA.
@@ -529,7 +529,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.20';
+  const SCRIPT_VERSION = '1.99.21';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -731,6 +731,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
     { key: 'kiShowIntel', group: 'Kraken Intel', label: '🐙 Show shared loadout intel on profile & attack pages', hint: 'Loadouts other contributors have observed. Uses your Torn API key for armour enrichment.' },
     { key: 'profileAttack', group: 'Kraken Intel', label: '\u2694 Profile pages: Attack button always opens the attack page', hint: 'Torn greys out the Attack button while a player is in hospital. This makes it work anyway (and adds a \u2694 Attack button if Torn\u2019s own can\u2019t be found), so you can be on the attack page ready for when they come out.' },
     { key: 'kiTempWarn', group: 'Kraken Intel', label: '\u26a0 Warn when their armour blocks or weakens temporaries', hint: 'From their Intel loadout, e.g. a Delta Gas Mask makes Pepper Spray, Tear Gas and Nerve Gas useless, and Delta armour makes other temps less effective. Big warning on their profile and the attack page, a pop-up when the fight page opens, and your own Temporary slot is marked if it won\u2019t work.' },
+    { key: 'kiJobWarn', group: 'Kraken Intel', label: '\ud83d\udcbc Show the enemy\u2019s job perks that affect a fight', hint: 'Reads their job and company stars from the Torn API (cached a day). E.g. Ladies Strip Club 10\u2605 takes 30% less melee damage.' },
     { key: 'kiContribute', group: 'Kraken Intel', label: '🐙 Share loadouts you observe with the Kraken Intel network', hint: 'On by default. Loadouts Torn reveals on attack pages you personally view get uploaded -- never your API key. You can switch it off here.' },
   ];
 
@@ -3012,6 +3013,92 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
   }
   let kiTempToastFor = null;
 
+  // ---- Enemy job perks (company specials that matter in a fight) ----
+  // [stars needed, special, what it means for you, 'key' = changes how you fight them]
+  const KI_JOB_PERKS = {
+    36: ['Ladies Strip Club', [[3, 'Hench', '+25% passive defence', 'key'], [5, 'Hormonal', '+50% Serotonin effect', 'info'], [10, 'Hardbody', '30% less melee damage taken', 'key']]],
+    26: ['Gents Strip Club', [[3, 'Dancer’s Flair', '+25% passive dexterity', 'key'], [5, 'Supple', '+50% Tyrosine effect', 'info'], [10, 'No Touching', '25% chance to dodge melee', 'key']]],
+    5: ['Clothing Store', [[5, 'Activewear', '+25% passive dexterity', 'key'], [10, 'Tailoring', '+20% armour mitigation', 'key']]],
+    37: ['Private Security Firm', [[3, 'Tactical Breach', '+50% flash grenade intensity', 'info'], [7, 'Regulation', '+25% full armour set bonus', 'key']]],
+    10: ['Adult Novelties', [[7, 'Bondage', 'your speed is cut by 25%', 'key']]],
+    21: ['Furniture Store', [[7, 'Beefcake', '+25% passive strength', 'key'], [10, 'Brute Force', 'double fist & kick damage', 'info']]],
+    22: ['Gas Station', [[3, 'Fueled', '+25% passive speed', 'key'], [5, 'Cauterize', 'occasionally heals during the fight', 'key'], [7, 'Fireproof', 'half fire damage taken', 'info'], [10, 'Blaze of Glory', '+50% fire damage dealt', 'info']]],
+    23: ['Music Store', [[5, 'High-fidelity', 'reduces your stealth', 'info'], [10, 'The Score', '+15% to all battle stats', 'key']]],
+    38: ['Mining Corporation', [[7, 'Essential Salts', '+10% maximum life', 'key'], [10, 'Preserved Meat', 'can boost life to 150%', 'key']]],
+    32: ['Lingerie Store', [[5, 'Born Free', '+50% speed & dexterity when wearing no armour', 'info']]],
+    6: ['Gun Shop', [[5, 'Skilled Analysis', 'always sees your loadout', 'info'], [7, 'Bandoleer', 'an extra clip for guns', 'info'], [10, 'Firearms Expert', '+10% gun damage', 'info']]],
+    4: ['Car Dealership', [[10, 'Getaway Car', 'can always escape', 'info']]],
+    18: ['Zoo', [[10, 'Seasoned Poacher', '+3 accuracy', 'info']]],
+    1: ['Hair Salon', [[5, 'Rumors', 'reduces your stealth', 'info'], [10, 'Sweeney’s Revenge', '+20% slashing weapon damage', 'info']]],
+    25: ['Pub', [[3, 'Drunken Master', '+10% melee damage', 'info']]],
+    27: ['Restaurant', [[3, 'Butcher', '+10% melee damage', 'info']]],
+    19: ['Firework Stand', [[5, 'Pyromania', 'stronger flamethrower', 'info']]],
+    31: ['Amusement Park', [[7, 'Adrenaline Rush', '+25% Epinephrine effect', 'info']]],
+  };
+  const KI_JOB_TTL = 24 * 3600 * 1000;
+  const kiJobBusy = new Set();
+  function kiJobCache() { const c = getCfg('tws_ki_jobs', {}); return (c && typeof c === 'object') ? c : {}; }
+  // Cached job info for a player, or null while it's being fetched (once).
+  function kiJobFor(id, onReady) {
+    id = Number(id);
+    if (!id || !featureOn('kiJobWarn')) return null;
+    const c = kiJobCache()[id];
+    if (c && Date.now() - c.t < KI_JOB_TTL) return c;
+    if (!kiJobBusy.has(id) && getApiKey()) {
+      kiJobBusy.add(id);
+      kiFetchJob(id).then((info) => {
+        const all = kiJobCache();
+        all[id] = info;
+        const keep = Object.entries(all).sort((x, y) => y[1].t - x[1].t).slice(0, 300);
+        setCfg('tws_ki_jobs', Object.fromEntries(keep));
+        if (onReady) onReady(info);
+      }).catch(() => {}).finally(() => kiJobBusy.delete(id));
+    }
+    return c || null; // stale data is still shown while refreshing
+  }
+  async function kiFetchJob(id) {
+    const p = await apiFetch(`user/${id}`, 'profile');
+    const j = (p && p.job) || {};
+    const info = { t: Date.now(), type: Number(j.company_type) || 0, company: j.company_name ? String(j.company_name).replace(/&amp;/g, '&') : '', companyId: Number(j.company_id) || 0, position: j.position || '', jobName: j.job || '', stars: null };
+    if (info.companyId) {
+      try {
+        const cp = await apiFetch(`company/${info.companyId}`, 'profile');
+        const r = cp && cp.company && Number(cp.company.rating);
+        if (r >= 0) info.stars = r;
+      } catch (e) { /* key can't read company stars -- shown as "needs N★" */ }
+    }
+    return info;
+  }
+  // { title, lines: [{ text, key, active }] } for a cached job, or null.
+  function kiJobSummary(info) {
+    if (!info) return null;
+    const def = KI_JOB_PERKS[info.type];
+    if (!info.type) {
+      const jn = String(info.jobName || '');
+      const p = String(info.position || '');
+      if (!jn && !p || /^none$/i.test(jn || p)) return { title: 'No job', lines: [] };
+      return { title: `Job: ${jn || p}${jn && p && p !== jn ? ` (${p})` : ''}`, lines: [] };
+    }
+    const name = (def && def[0]) || 'Company';
+    const title = `Job: ${name}${info.stars != null ? ` ${info.stars}★` : ''}`;
+    if (!def) return { title, lines: [] };
+    const lines = def[1].filter((x) => info.stars == null || info.stars >= x[0])
+      .map(([st, , text, lvl]) => ({ text: info.stars == null ? `${text} (if ${st}★+)` : text, key: lvl === 'key' }));
+    return { title, lines, starsUnknown: info.stars == null };
+  }
+  // Key perks only, for the attack-page warning tab.
+  function kiJobWarnLines(id) {
+    const sm = kiJobSummary(kiJobFor(id, () => { try { kiScheduleAttackEquipmentRender(); } catch (e) { /* ignore */ } }));
+    if (!sm) return [];
+    return sm.lines.filter((l) => l.key).map((l) => ({ cls: 'job', text: `💼 ${sm.title.replace(/^Job: /, '')}: ${l.text}` }));
+  }
+  function kiJobHtml(id, rerender) {
+    const sm = kiJobSummary(kiJobFor(id, rerender));
+    if (!sm) return '';
+    const lines = sm.lines.map((l) => `<div class="tws-job-line${l.key ? ' is-key' : ''}">${l.key ? '⚠ ' : ''}${kiEsc(l.text)}</div>`).join('');
+    return `<div class="tws-job"><div class="tws-job-title">💼 ${kiEsc(sm.title)}</div>${lines}${sm.starsUnknown && sm.lines.length ? '<div class="tws-job-note">Company stars not available with your key – add Company: profile to see which are active.</div>' : ''}</div>`;
+  }
+
   // Item rarity colour (yellow / orange / red) from the intel, if Torn gave it.
   function kiRarityOf(item) {
     const r = String((item && item.rarity) || '').toLowerCase().match(/yellow|orange|red/);
@@ -3036,14 +3123,14 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
   // ---- Attack page: temporary warning (flash, then a small tab) ----
   let kiTempFlashFor = null;
   const kiRarityAsked = new Set();
-  function kiTempPopEl(w, extra) {
+  function kiTempPopEl(w, extra, jobs) {
     const el = document.createElement('div');
     el.className = `tws-ki-temp-pop ${extra || ''}`.trim();
     const head = document.createElement('div');
     head.className = 'tws-ki-temp-pop-head';
-    head.textContent = '⚠ Temporary warning';
+    head.textContent = w.any ? '\u26a0 Temporary warning' : '\u26a0 Watch out';
     el.appendChild(head);
-    kiTempWarnLines(w).forEach((l) => {
+    kiTempWarnLines(w).concat(jobs || []).forEach((l) => {
       const row = document.createElement('div');
       row.className = `tws-ki-temp-pop-${l.cls}`;
       row.textContent = l.text;
@@ -3051,13 +3138,14 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
     });
     return el;
   }
-  function kiShowTempWarnUI(w, avatar) {
+  function kiShowTempWarnUI(w, avatar, jobs) {
+    jobs = jobs || [];
     const mine = kiAttackerTempName();
     const tempWrap = mine.wrap || kiAttackerWeaponWrapper(5);
     const hard = !!(mine.name && w.blocked[mine.name]);
     const soft = !hard && !!(mine.name && w.reduced.includes(mine.name));
     if (tempWrap && (hard || soft)) tempWrap.classList.add(hard ? 'tws-ki-temp-bad' : 'tws-ki-temp-warn');
-    const sev = (hard || (!soft && w.blocks.length)) ? 'is-block' : 'is-reduce';
+    const sev = (hard || (!soft && w.blocks.length) || (!w.any && jobs.length)) ? 'is-block' : 'is-reduce';
     const tab = document.createElement('div');
     tab.className = `tws-ki-temp-tab ${sev}`;
     tab.textContent = '⚠';
@@ -3074,13 +3162,13 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
       tab.style.top = `${Math.round(r.top + sy + 4)}px`;
     }
     document.body.appendChild(tab);
-    tab.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); kiToggleTempPop(w, tab); });
-    const key = `${kiState.latest && kiState.latest.target_id}|${kiTempWarnLines(w).map((l) => l.text).join('|')}`;
-    if (kiTempFlashFor !== key) { kiTempFlashFor = key; kiFlashTempWarn(w, avatar, tab); }
+    tab.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); kiToggleTempPop(w, tab, jobs); });
+    const key = `${kiState.latest && kiState.latest.target_id}|${kiTempWarnLines(w).concat(jobs).map((l) => l.text).join('|')}`;
+    if (kiTempFlashFor !== key) { kiTempFlashFor = key; kiFlashTempWarn(w, avatar, tab, jobs); }
   }
-  function kiFlashTempWarn(w, avatar, tab) {
+  function kiFlashTempWarn(w, avatar, tab, jobs) {
     document.querySelectorAll('.tws-ki-temp-flash').forEach((n) => n.remove());
-    const el = kiTempPopEl(w, 'tws-ki-temp-flash');
+    const el = kiTempPopEl(w, 'tws-ki-temp-flash', jobs);
     document.body.appendChild(el);
     const sx = window.scrollX || 0;
     const sy = window.scrollY || 0;
@@ -3098,10 +3186,10 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
       setTimeout(() => el.remove(), 420);
     }, 1600);
   }
-  function kiToggleTempPop(w, tab) {
+  function kiToggleTempPop(w, tab, jobs) {
     const old = document.querySelector('.tws-ki-temp-open');
     if (old) { old.remove(); return; }
-    const el = kiTempPopEl(w, 'tws-ki-temp-open');
+    const el = kiTempPopEl(w, 'tws-ki-temp-open', jobs);
     document.body.appendChild(el);
     const sx = window.scrollX || 0;
     const sy = window.scrollY || 0;
@@ -3158,6 +3246,10 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
     badge.textContent = confidence.label;
     meta.append(identity, badge);
     kiView.body.appendChild(meta);
+    {
+      const jh = kiJobHtml(kiState.latest.target_id, () => { try { kiRenderProfilePanel(); } catch (e) { /* ignore */ } });
+      if (jh) { const jw = document.createElement('div'); jw.innerHTML = jh; kiView.body.appendChild(jw.firstElementChild); }
+    }
 
     const items = kiState.latest.items.filter((i) => i && i.item_id !== 999);
     const bySlot = (n) => items.find((i) => Number(i.equip_slot) === n) || null;
@@ -3526,9 +3618,10 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
       // PC layout: Torn shows the defender's weapons in its own slots on the
       // right, so no floating labels -- the slots get hover stats instead.
       if (pcMode()) { kiTagDefenderSlots(avatar); kiInstallHoverStats(); }
-      if (featureOn('kiTempWarn')) {
-        const w = kiTempWarnings(kiState.latest.items);
-        if (w.any) kiShowTempWarnUI(w, avatar);
+      {
+        const w = featureOn('kiTempWarn') ? kiTempWarnings(kiState.latest.items) : { blocks: [], blocked: {}, delta: 0, reduced: [], any: false };
+        const jobs = kiJobWarnLines(kiState.latest.target_id);
+        if (w.any || jobs.length) kiShowTempWarnUI(w, avatar, jobs);
       }
       // Mobile Mode: weapons are shown in the ENEMY fold-out tab instead of
       // floating labels around the model.
@@ -3772,6 +3865,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
   }
   function kiEsc(v) { return String(v == null ? '' : v).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
   function kiEnemyWeaponBox(slotName, item) {
+    if (!item && /^(Helmet|Body|Legs|Feet|Hands)$/.test(slotName)) return `<div class="tws-ew-box tws-ew-empty"><div class="tws-ew-slot">${slotName}</div><div class="tws-ew-none">None seen</div></div>`;
     if (!item) return `<div class="tws-ew-box tws-ew-empty"><div class="tws-ew-slot">${slotName}</div><div class="tws-ew-none">Unknown</div></div>`;
     const dmg = kiFmt2(item.damage);
     const acc = kiFmt2(item.accuracy);
@@ -3782,8 +3876,9 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
       <div class="tws-ew-slot">${slotName}</div>
       ${item.image_url ? `<img class="tws-ew-img" src="${kiEsc(item.image_url)}" alt="">` : ''}
       <div class="tws-ew-name">${kiEsc(item.name)}</div>
-      <div class="tws-ew-stats">${dmg !== null ? `Dmg <b>${dmg}</b>` : ''}${acc !== null ? ` &nbsp;Acc <b>${acc}</b>` : ''}</div>
+      <div class="tws-ew-stats">${kiIsArmourSlot(item) ? (kiFmt2(item.armour) !== null ? `Armour <b>${kiFmt2(item.armour)}</b>` : '') : `${dmg !== null ? `Dmg <b>${dmg}</b>` : ''}${acc !== null ? ` &nbsp;Acc <b>${acc}</b>` : ''}`}</div>
       ${bon ? `<div class="tws-ew-bonuses">${bon}</div>` : ''}
+      ${(() => { const nm = String(item.name || '').toLowerCase(); const bl = kiIsArmourSlot(item) && KI_TEMP_BLOCKS.find(([k]) => nm.includes(k)); return bl ? `<div class="tws-ew-blocks">Blocks: ${kiEsc(kiListTemps(bl[1]))}</div>` : ''; })()}
     </div>`;
   }
   function kiEnemyDrawerHtml() {
@@ -3795,13 +3890,16 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
     const age = kiTab.live ? 'Live \u2013 seen in this fight' : `${kiObservationConfidence(intel.observed_at).label} \u00b7 seen ${kiAgo(intel.observed_at)}`;
     head = `<div class="tws-ew-head"><b>${kiEsc(intel.target_name || 'Enemy')}</b><span class="tws-ew-x" data-ew-close="1">\u00d7</span></div><div class="tws-ew-age">${kiEsc(age)}</div>`;
     const weapons = [[1, 'Primary'], [2, 'Secondary'], [3, 'Melee'], [5, 'Temporary']].map(([n, l]) => kiEnemyWeaponBox(l, bySlot(n))).join('');
-    const ARM_ORDER = [6, 4, 7, 8, 9]; // Helmet, Body, Legs, Feet, Hands
-    const armour = items.filter((i) => kiIsArmourSlot(i)).sort((a, b) => ARM_ORDER.indexOf(Number(a.equip_slot)) - ARM_ORDER.indexOf(Number(b.equip_slot))).map((i) => {
-      const arm = kiFmt2(i.armour);
-      const bon = (Array.isArray(i.bonuses) ? i.bonuses : []).map((b) => `${kiEsc(b.name)}${b.value == null ? '' : ` ${kiEsc(b.value)}%`}`).join(', ');
-      return `<div class="tws-ew-arm"><span class="tws-ew-arm-slot">${kiEsc(KI_COMBAT_SLOTS.get(Number(i.equip_slot)) || i.slot_name || 'Armour')}</span> ${kiEsc(i.name)}${arm !== null ? ` <b>${arm}</b>` : ''}${bon ? `<div class="tws-ew-arm-bon">${bon}</div>` : ''}</div>`;
-    }).join('');
-    return `${head}<div class="tws-ew-weapons">${weapons}</div>${armour ? `<div class="tws-ew-sub">Armour</div>${armour}` : ''}`;
+    const armour = [[6, 'Helmet'], [4, 'Body'], [7, 'Legs'], [8, 'Feet'], [9, 'Hands']].map(([n, l]) => kiEnemyWeaponBox(l, bySlot(n))).join('');
+    // Missing rarity: one Torn API lookup per player, then redraw.
+    if (!kiTab.rarityAsked && items.some((i) => !kiRarityOf(i) && kiPositiveInteger(i.armoury_id))) {
+      kiTab.rarityAsked = true;
+      const tid = kiTab.targetId;
+      kiEnrichCaptureWithTornApi(intel).then((en) => { if (en && kiTab.targetId === tid && en !== intel) kiSetTabIntel(tid, en, kiTab.live, ''); }).catch(() => {});
+    }
+    const job = kiJobHtml(kiTab.targetId, () => { kiTab.sig = ''; try { kiRenderEnemyTab(); } catch (e) { /* ignore */ } });
+    const anyArmour = items.some((i) => kiIsArmourSlot(i));
+    return `${head}${job}<div class="tws-ew-weapons">${weapons}</div>${anyArmour ? `<div class="tws-ew-sub">Armour</div><div class="tws-ew-weapons">${armour}</div>` : ''}`;
   }
   function kiAgo(iso) {
     const s2 = Math.max(0, (Date.now() - Date.parse(iso)) / 1000);
@@ -3854,7 +3952,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
       return;
     }
     if (tid !== kiTab.targetId) {
-      kiTab.targetId = tid; kiTab.intel = null; kiTab.live = false; kiTab.status = 'Looking for intel\u2026'; kiTab.sig = '';
+      kiTab.targetId = tid; kiTab.intel = null; kiTab.live = false; kiTab.status = 'Looking for intel\u2026'; kiTab.sig = ''; kiTab.rarityAsked = false;
     }
     if (!kiTab.intel && !kiTab.loading) {
       if (kiState.latest && kiState.latest.target_id === tid) kiTab.intel = kiState.latest;
@@ -4081,7 +4179,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
         <p>To get started, open <b>\u2699 Settings</b> and add your Torn API key:</p>
         <ul>
           <li><b>Custom key</b> with this access:
-            <div class="tws-wel-access">User: basic, profile, bars, cooldowns, battlestats, personalstats<br>Faction: basic, attacks, rankedwars<br>Torn: items</div>
+            <div class="tws-wel-access">User: basic, profile, bars, cooldowns, battlestats, personalstats<br>Faction: basic, attacks, rankedwars<br>Torn: items<br>Company: profile</div>
           </li>
           <li>or a <b>Limited Access</b> key, which covers all of the above.</li>
         </ul>
@@ -9138,6 +9236,14 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
     .tws-ki-temp-pop { position: absolute; z-index: 2147482995; max-width: min(300px, 78vw); padding: 5px 9px; border-radius: 6px; background: rgba(60, 12, 12, .94); border: 1px solid #ff4d4d; color: #ffd0d0; font: bold 11px/1.4 Arial, sans-serif; box-shadow: 0 3px 10px rgba(0,0,0,.6); }
     .tws-ki-temp-pop-head { color: #ffcf4d; font-size: 11px; letter-spacing: .3px; }
     .tws-ki-temp-pop-reduce { color: #ffd98a; }
+    .tws-ki-temp-pop-job { color: #ffe0b0; }
+    .tws-job { margin: 0 0 8px; padding: 6px 9px; border-radius: 6px; background: #2b2620; border: 1px solid #6b5530; font: 12px/1.45 Arial, sans-serif; color: #ddd; }
+    .tws-job-title { font-weight: bold; color: #f0c45a; margin-bottom: 1px; }
+    .tws-job-line { color: #bbb; font-size: 11px; }
+    .tws-job-line.is-key { color: #ffb4a8; font-weight: bold; }
+    .tws-job-note { color: #888; font-size: 10px; margin-top: 2px; }
+    #tws-ki-panel .tws-job { margin: 0; border-radius: 0; border-width: 1px 0 0; }
+    #tws-ew-drawer .tws-ew-blocks { margin-top: 3px; color: #ff9b94; font-size: 11px; font-weight: bold; }
     .tws-ki-temp-flash { pointer-events: none; transition: transform .38s ease-in, opacity .38s ease-in; transform-origin: center; }
     .tws-ki-temp-open { cursor: pointer; }
     .tws-ki-temp-mark { position: absolute; left: 0; right: 0; top: 0; bottom: 0; z-index: 20; display: flex; align-items: center; justify-content: center; text-align: center; padding: 4px; font: bold 12px/1.3 Arial, sans-serif; color: #fff; pointer-events: none; }
