@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Sandbox War Room 🧪
 // @namespace    jay-torn-war-script-sandbox
-// @version      1.99.28
+// @version      1.99.29
 // @downloadURL  https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @updateURL    https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @description  [SANDBOX - test build, not for general use] Enemy hospital timers, quick attack links, and a chain timeout alert overlay for Torn faction war pages. Works in Tampermonkey (Firefox) and Torn PDA.
@@ -14,6 +14,7 @@
 // @connect      lilywaterbug.art
 // @connect      lilywaterbug.alwaysdata.net
 // @connect      what-the-f.de
+// @connect      www.tornstats.com
 // @connect      www.torn.com
 // @connect      igiyqcgpwonbbjdnvxwd.supabase.co
 // @connect      dashing-fish-54.eu-west-1.convex.site
@@ -581,7 +582,7 @@ const __twsOuter = (() => {
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.28';
+  const SCRIPT_VERSION = '1.99.29';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -617,6 +618,8 @@ const __twsOuter = (() => {
     ffscouterKey: 'tws_ffscouter_key',
     statsSource: 'tws_stats_source',
     bspKey: 'tws_bsp_key',
+    tsKey: 'tws_ts_key',
+    tsCache: 'tws_ts_cache',
     bspCache: 'tws_bsp_cache',
     turboMode: 'tws_turbo_mode',
     targetIds: 'tws_target_ids',
@@ -738,6 +741,7 @@ const __twsOuter = (() => {
     { key: 'travelShared', group: 'Roster display', label: '✈ Shared travel tracking (Kraken server)', hint: 'During a war the server watches the enemy roster once a minute, so take-offs are caught even when nobody has the panel open. Only the enemy faction ID and your player ID are sent.', requires: 'travelTimers' },
     { key: 'activityHistory', group: 'Roster display', label: '\ud83d\udcca Activity history (Kraken server)', hint: 'Above the enemy list: how many of them are usually online at this hour, and the quietest hours to hit them. Learned by the Kraken server over time; only the enemy faction ID and your player ID are sent.' },
     { key: 'ffStats', group: 'Roster display', label: 'Estimated battle stats (FFScouter or BSP)', hint: 'Off also stops the FFScouter / BSP requests. Pick which one in the main Settings tab. Stats are cached so they stay on screen.' },
+    { key: 'tsSpies', group: 'Roster display', label: '\ud83d\udd75 TornStats spies: real battle stats instead of estimates', hint: 'Needs your TornStats key in General. Uses the spies your faction has shared on TornStats (spies up to 60 days old replace the estimate; older ones are still shown with their age). Kept on this device only \u2013 never sent to the Kraken server.' },
     { key: 'sortBar', group: 'Roster display', label: 'Sort bar (Timer / Stats / Respect / direction)' },
     { key: 'respectSort', group: 'Roster display', label: 'Respect option in the sort bar', hint: 'Shows name, level, stats and this war\u2019s respect. Only appears during a war.', requires: 'sortBar' },
     { key: 'filterBar', group: 'Roster display', label: 'Filter chips (Online / Idle / Offline ...)' },
@@ -3290,6 +3294,10 @@ const __twsOuter = (() => {
       kiView.body.appendChild(status);
     }
 
+    {
+      const sh = tsSpyHtml(kiCurrentTargetId(), () => { try { kiRenderProfilePanel(); } catch (e) { /* ignore */ } });
+      if (sh) { const sw = document.createElement('div'); sw.innerHTML = sh; kiView.body.appendChild(sw.firstElementChild); }
+    }
     if (!kiState.latest) {
       if (!kiView.status) {
         const empty = document.createElement('div');
@@ -3955,7 +3963,7 @@ const __twsOuter = (() => {
   function kiEnemyDrawerHtml() {
     const intel = kiTab.intel;
     let head = `<div class="tws-ew-head"><b>Enemy loadout</b><span class="tws-ew-x" data-ew-close="1">\u00d7</span></div>`;
-    if (!intel) return `${head}<div class="tws-ew-msg">${kiEsc(kiTab.status || 'Looking for intel\u2026')}</div>`;
+    if (!intel) return `${head}${tsSpyHtml(kiTab.targetId, () => { kiTab.sig = ''; try { kiRenderEnemyTab(); } catch (e) { /* ignore */ } })}<div class="tws-ew-msg">${kiEsc(kiTab.status || 'Looking for intel\u2026')}</div>`;
     const items = Array.isArray(intel.items) ? intel.items : [];
     const bySlot = (n) => items.find((i) => Number(i.equip_slot) === n && i.item_id !== 999) || null;
     const age = kiTab.live ? 'Live \u2013 seen in this fight' : `${kiObservationConfidence(intel.observed_at).label} \u00b7 seen ${kiAgo(intel.observed_at)}`;
@@ -3970,7 +3978,8 @@ const __twsOuter = (() => {
     }
     const job = kiJobHtml(kiTab.targetId, () => { kiTab.sig = ''; try { kiRenderEnemyTab(); } catch (e) { /* ignore */ } });
     const anyArmour = items.some((i) => kiIsArmourSlot(i));
-    return `${head}${job}<div class="tws-ew-weapons">${weapons}</div>${anyArmour ? `<div class="tws-ew-sub">Armour</div><div class="tws-ew-weapons">${armour}</div>` : ''}`;
+    const spyLine = tsSpyHtml(kiTab.targetId, () => { kiTab.sig = ''; try { kiRenderEnemyTab(); } catch (e) { /* ignore */ } });
+    return `${head}${spyLine}${job}<div class="tws-ew-weapons">${weapons}</div>${anyArmour ? `<div class="tws-ew-sub">Armour</div><div class="tws-ew-weapons">${armour}</div>` : ''}`;
   }
   function kiAgo(iso) {
     const s2 = Math.max(0, (Date.now() - Date.parse(iso)) / 1000);
@@ -4215,14 +4224,143 @@ const __twsOuter = (() => {
     if (!ffR.error && ffR.skipped && featureOn('ffStats')) errs.push('FFScouter: add your FFScouter key in Settings to see both.');
     return { map, error: errs.length ? errs.join(' \u00b7 ') : null };
   }
-  function fetchFFStats(targetIds) {
+  function fetchFFStatsEst(targetIds) {
     const v = statsSource();
     if (v === 'both') return fetchBothStats(targetIds);
     return v === 'bsp' ? fetchBspStats(targetIds) : fetchFFScouterStats(targetIds);
   }
+  // Estimates, with TornStats spies on top where your faction has one.
+  async function fetchFFStats(targetIds) {
+    const r = await fetchFFStatsEst(targetIds);
+    try { tsApplySpies(r.map, targetIds); } catch (e) { /* ignore */ }
+    return r;
+  }
+
+  // ---------------------------------------------------------------------
+  // TORNSTATS SPIES (optional)
+  // Real battle stats from the spies your faction shares on TornStats. One
+  // call loads every spy on a faction (kept 2 hours); a single player is
+  // asked for only when needed (kept 6 hours). Spies are kept on this device
+  // only and never sent to the Kraken server.
+  // ---------------------------------------------------------------------
+  const TS_FAC_MS = 2 * 3600 * 1000;
+  const TS_USER_MS = 6 * 3600 * 1000;
+  const TS_FAIL_MS = 10 * 60 * 1000;
+  const TS_FRESH_DAYS = 60;            // newer than this replaces the estimate
+  const TS_DROP_MS = 7 * 86400 * 1000; // forget cached lookups after a week
+  let tsCache = { f: {}, u: {} };
+  let tsSavedAt = 0;
+  const tsBusy = {};
+  let tsLastError = '';
+  try {
+    const raw = JSON.parse(getCfg(STORE_KEYS.tsCache, '{}')) || {};
+    const nowMs = Date.now();
+    tsCache.f = raw.f || {};
+    tsCache.u = {};
+    Object.keys(raw.u || {}).forEach((id) => { if (raw.u[id] && nowMs - raw.u[id].t < TS_DROP_MS) tsCache.u[id] = raw.u[id]; });
+  } catch (e) { tsCache = { f: {}, u: {} }; }
+  function tsSave(force) {
+    const nowMs = Date.now();
+    if (!force && nowMs - tsSavedAt < 5000) return;
+    tsSavedAt = nowMs;
+    try { setCfg(STORE_KEYS.tsCache, JSON.stringify(tsCache)); } catch (e) { /* in-memory still works */ }
+  }
+  function tsKey() { return String(getCfg(STORE_KEYS.tsKey) || '').trim(); }
+  function tsOn() { return featureOn('tsSpies') && !!tsKey(); }
+  function tsResetFails() { tsCache.f = {}; Object.keys(tsCache.u).forEach((id) => { if (!tsCache.u[id].s) delete tsCache.u[id]; }); tsLastError = ''; tsSave(true); }
+  function tsParseSpy(o) {
+    if (!o || typeof o !== 'object' || o.status === false) return null;
+    const n = (k) => Number(String(o[k] == null ? '' : o[k]).replace(/[^0-9.]/g, '')) || 0;
+    const str = n('strength'); const def = n('defense'); const spd = n('speed'); const dex = n('dexterity');
+    const total = n('total') || (str + def + spd + dex);
+    if (total <= 0) return null;
+    let ts = Number(o.timestamp || o.update || o.updated || 0) || 0;
+    if (ts > 1e12) ts = Math.round(ts / 1000);
+    return { str, def, spd, dex, total, ts };
+  }
+  function tsMsg(d) { return String((d && (d.message || (d.error && (d.error.error || d.error)))) || 'TornStats request failed').slice(0, 120); }
+  async function tsLoadFaction(fid) {
+    fid = String(fid || '');
+    if (!tsOn() || !fid || tsBusy['f' + fid]) return;
+    const c = tsCache.f[fid];
+    if (c && Date.now() - c.t < (c.err ? TS_FAIL_MS : TS_FAC_MS)) return;
+    if (document.visibilityState !== 'visible') return;
+    tsBusy['f' + fid] = true;
+    try {
+      const d = await httpGetJson(`https://www.tornstats.com/api/v2/${encodeURIComponent(tsKey())}/spy/faction/${encodeURIComponent(fid)}`);
+      if (!d || d.status === false || !d.faction) throw new Error(tsMsg(d));
+      const nowMs = Date.now();
+      let n = 0;
+      Object.entries(d.faction.members || {}).forEach(([id, m]) => {
+        const sp = m ? (tsParseSpy(m.spy) || tsParseSpy(m.stats) || tsParseSpy(m.battlestats) || tsParseSpy(m.spy_data) || tsParseSpy(m)) : null;
+        if (sp) n++;
+        tsCache.u[String((m && m.id) || id)] = { t: nowMs, s: sp };
+      });
+      tsCache.f[fid] = { t: nowMs, n };
+      tsLastError = '';
+    } catch (e) {
+      tsCache.f[fid] = { t: Date.now(), err: (e && e.message) || 'failed' };
+      tsLastError = (e && e.message) || 'TornStats request failed';
+    } finally {
+      tsBusy['f' + fid] = false;
+      tsSave(true);
+    }
+  }
+  async function tsLoadUser(id) {
+    id = String(id || '');
+    if (!tsOn() || !id || tsBusy['u' + id]) return null;
+    const c = tsCache.u[id];
+    if (c && Date.now() - c.t < (c.s ? TS_USER_MS : TS_FAIL_MS * 3)) return c.s || null;
+    tsBusy['u' + id] = true;
+    try {
+      const d = await httpGetJson(`https://www.tornstats.com/api/v2/${encodeURIComponent(tsKey())}/spy/user/${encodeURIComponent(id)}`);
+      if (!d || d.status === false) throw new Error(tsMsg(d));
+      const raw = (d.compare && d.compare.spy) || d.spy || null;
+      const sp = tsParseSpy(raw);
+      if (sp && !sp.ts && d.compare && d.compare.timestamp) { const t2 = Date.parse(d.compare.timestamp) || Number(d.compare.timestamp) * 1000; if (t2) sp.ts = Math.round(t2 / 1000); }
+      tsCache.u[id] = { t: Date.now(), s: sp };
+      tsLastError = '';
+      return sp;
+    } catch (e) {
+      tsCache.u[id] = { t: Date.now(), s: null };
+      tsLastError = (e && e.message) || 'TornStats request failed';
+      return null;
+    } finally {
+      tsBusy['u' + id] = false;
+      tsSave();
+    }
+  }
+  function tsSpyFor(id) { const c = tsCache.u[String(id)]; return (c && c.s) || null; }
+  function tsAgeDays(sp) { return sp && sp.ts ? Math.max(0, Math.floor((Date.now() / 1000 - sp.ts) / 86400)) : null; }
+  function tsAgeText(sp) { const d = tsAgeDays(sp); return d === null ? 'age unknown' : d === 0 ? 'today' : `${d}d ago`; }
+  function tsFresh(sp) { const d = tsAgeDays(sp); return !!sp && (d === null || d <= TS_FRESH_DAYS); }
+  function tsSplitText(sp) { return `Str ${fmtBsHuman(sp.str)} · Def ${fmtBsHuman(sp.def)} · Spd ${fmtBsHuman(sp.spd)} · Dex ${fmtBsHuman(sp.dex)}`; }
+  function tsApplySpies(map, ids) {
+    if (!tsOn() || !map) return;
+    (ids || []).forEach((id) => {
+      const sp = tsSpyFor(id);
+      if (!tsFresh(sp)) return;
+      const base = map[id] || { player_id: Number(id) };
+      const e = Object.assign({}, base, { spy: sp, bs_estimate: sp.total, bs_estimate_human: fmtBsHuman(sp.total), source: 'ts-spy', both: false });
+      if (typeof base.fair_fight === 'number') e.ffFallback = base.fair_fight;
+      delete e.fair_fight; // worked out from the spy and your own stats
+      map[id] = e;
+    });
+  }
+  // One line for the Intel panel / ENEMY tab.
+  function tsSpyHtml(id, rerender) {
+    if (!tsOn() || !id) return '';
+    const sp = tsSpyFor(id);
+    const c = tsCache.u[String(id)];
+    if (!c && rerender) tsLoadUser(id).then((x) => { if (x) { try { rerender(); } catch (e) { /* ignore */ } } }).catch(() => {});
+    if (!sp) return '';
+    const old = !tsFresh(sp);
+    return `<div class="tws-ts-spy${old ? ' tws-ts-old' : ''}">🕵 Spy <b>${fmtBsHuman(sp.total)}</b> · ${tsSplitText(sp)} <span class="tws-ts-age">(${tsAgeText(sp)}${old ? ', old' : ''})</span></div>`;
+  }
   // Text of a player's estimate(s) for the roster ("F 107k · B 112k" in Both mode).
   function estText(e) {
     if (!e) return '';
+    if (e.spy) return `${e.bs_estimate_human} (spied ${tsAgeText(e.spy)})`;
     if (e.both) return `F ${e.ffHuman || '\u2013'} \u00b7 B ${e.bspHuman || '\u2013'}`;
     return e.bs_estimate_human || '?';
   }
@@ -4258,6 +4396,12 @@ const __twsOuter = (() => {
   }
   function fairFightOf(e) {
     if (!e) return null;
+    // A TornStats spy: FF from the real stats and yours (FFScouter's FF until yours are known).
+    if (e.spy && e.spy.total > 0) {
+      if (ownBs) return 1 + (8 / 3) * (e.spy.total / ownBs);
+      wantOwnBattleStats();
+      return typeof e.ffFallback === 'number' && e.ffFallback > 0 ? e.ffFallback : null;
+    }
     if (typeof e.fair_fight === 'number' && e.fair_fight > 0) return e.fair_fight;
     if (typeof e.bs_estimate === 'number' && e.bs_estimate > 0) {
       if (!ownBs) { wantOwnBattleStats(); return null; }
@@ -4308,6 +4452,7 @@ const __twsOuter = (() => {
 
   function estHtml(e) {
     if (!e) return '';
+    if (e.spy) return `<span class="tws-est-spy" title="TornStats spy, ${tsAgeText(e.spy)}: ${tsSplitText(e.spy)}">\ud83d\udd75${e.bs_estimate_human}</span>`;
     if (e.both) {
       const tag = (t) => `<span style="color:#8a8a8a;font-size:0.85em;">${t}</span>`;
       return `${tag('F')} ${e.ffHuman || '\u2013'} ${tag('B')} <span class="tws-est-bsp">${e.bspHuman || '\u2013'}</span>`;
@@ -8039,6 +8184,7 @@ const __twsOuter = (() => {
         // FFScouter estimated battle stats -- optional, and cached (see
         // fetchFFStats), so they're merged in from the cache every cycle
         // even when no request was needed or a request failed.
+        if (tsOn()) await tsLoadFaction(enemyFactionId).catch(() => {});
         const ffResult = await fetchFFStats(enemyMembers.map((m) => m.id));
         ffError = ffResult.error;
         if (Object.keys(ffResult.map).length) {
@@ -9131,6 +9277,10 @@ const __twsOuter = (() => {
     #tws-temp-quick .tws-tq-btn.tws-tq-none small { color: #777; }
     #tws-po-stats { padding: 3px 10px 4px; background: #1a1a1a; border-bottom: 1px solid #333; font: 12px Arial, sans-serif; color: #ccc; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     #tws-po-stats b { color: #fff; }
+    .tws-ts-spy { margin: 4px 0 6px; padding: 4px 8px; border-radius: 6px; background: #1d2a1f; border: 1px solid #2f5a35; color: #cfe8cf; font: 12px Arial, sans-serif; }
+    .tws-ts-spy b { color: #fff; }
+    .tws-ts-spy .tws-ts-age { color: #9ab79a; }
+    .tws-ts-spy.tws-ts-old { background: #2a2620; border-color: #5a4a2f; color: #e0cfa8; }
     #tws-po-stats .tws-po-bspwhy { color: #e0a030; }
     #tws-po-life { display: flex; align-items: center; gap: 8px; padding: 3px 10px 5px; background: #1a1a1a; border-bottom: 1px solid #333; font: bold 12px Arial, sans-serif; color: #ddd; }
     #tws-po-life .tws-po-life-txt { white-space: nowrap; }
@@ -9520,6 +9670,8 @@ const __twsOuter = (() => {
     if (ff !== null) setCfg(STORE_KEYS.ffscouterKey, ff);
     const bsp = val('#tws-in-bsp');
     if (bsp !== null) setCfg(STORE_KEYS.bspKey, bsp);
+    const ts = val('#tws-in-ts');
+    if (ts !== null) setCfg(STORE_KEYS.tsKey, ts);
     const srcSel = body.querySelector('#tws-in-statsrc');
     if (srcSel) setCfg(STORE_KEYS.statsSource, (srcSel.value === 'bsp' || srcSel.value === 'both') ? srcSel.value : 'ff');
     const bloodSel = body.querySelector('#tws-in-blood');
@@ -10751,6 +10903,9 @@ const __twsOuter = (() => {
           <input id="tws-in-ff" type="text" value="${getCfg(STORE_KEYS.ffscouterKey)}" placeholder="16-char key from ffscouter.com">
           <label>BSP key (the Torn API key you registered with BSP)</label>
           <input id="tws-in-bsp" type="text" value="${getCfg(STORE_KEYS.bspKey)}" placeholder="${bspInstalledKey() ? 'Using the key from BSP on this device' : '16-char Torn key registered with BSP'}">
+          <label>TornStats key (optional \u2013 your faction\u2019s spies)</label>
+          <input id="tws-in-ts" type="text" value="${getCfg(STORE_KEYS.tsKey)}" placeholder="Your TornStats API key (tornstats.com \u2192 Settings)">
+          <div style="color:#888;font-size:11px;margin:2px 0 8px;">Real stats from spies your faction shares on TornStats replace the estimates (\ud83d\udd75). Sent only to TornStats; the spies stay on this device.</div>
           <div style="color:#888;font-size:11px;margin:2px 0 8px;">Only used when BSP is picked above. If BSP is installed on this device, its saved predictions are used first (no requests), and its key is picked up automatically. The key is sent only to the BSP server, as BSP itself does.</div>
           <label>Medical item for the header 🩸 button</label>
           <select id="tws-in-med">
@@ -10848,9 +11003,9 @@ const __twsOuter = (() => {
         showToast(`Estimated battle stats: ${statsSource() === 'both' ? 'FFScouter + BSP' : statsSourceName()}`);
         refreshRosters();
       });
-      [['#tws-in-ff', STORE_KEYS.ffscouterKey], ['#tws-in-bsp', STORE_KEYS.bspKey]].forEach(([sel, k]) => {
+      [['#tws-in-ff', STORE_KEYS.ffscouterKey], ['#tws-in-bsp', STORE_KEYS.bspKey], ['#tws-in-ts', STORE_KEYS.tsKey]].forEach(([sel, k]) => {
         const el = body.querySelector(sel);
-        if (el) el.addEventListener('change', () => { setCfg(k, el.value.trim()); refreshRosters(); });
+        if (el) el.addEventListener('change', () => { setCfg(k, el.value.trim()); if (k === STORE_KEYS.tsKey) tsResetFails(); refreshRosters(); });
       });
       body.querySelector('#tws-save-btn').addEventListener('click', () => {
         saveGeneralFields(body);
@@ -12178,13 +12333,15 @@ const __twsOuter = (() => {
     return 0;
   }
   const poStats = { id: 0, html: '', busy: false, at: 0 };
-  function poStatsHtml(ffE, bspE, bspWhy) {
+  function poStatsHtml(ffE, bspE, bspWhy, spy) {
     const parts = [];
-    const ff = fairFightOf(ffE || bspE);
+    const useSpy = spy && tsFresh(spy);
+    const ff = fairFightOf(useSpy ? { spy, ffFallback: ffE && ffE.fair_fight } : (ffE || bspE));
     if (typeof ff === 'number' && isFinite(ff)) {
       const c = ffColour(ff);
       parts.push(`<b style="${c ? `color:${c};` : ''}">FF ${ff.toFixed(2)}</b>`);
     }
+    if (spy) parts.push(`<span title="${kiEsc(tsSplitText(spy))}">\ud83d\udd75 Spy <b>${fmtBsHuman(spy.total)}</b> (${tsAgeText(spy)})</span>`);
     if (ffE && ffE.bs_estimate_human) parts.push(`FFScouter <b>${kiEsc(ffE.bs_estimate_human)}</b>`);
     if (bspE && bspE.bs_estimate_human) parts.push(`BSP <b>${kiEsc(bspE.bs_estimate_human)}</b>${bspE.source === 'bsp-spy' ? ' (spy)' : ''}`);
     else if (bspWhy) parts.push(`<span class="tws-po-bspwhy" title="${kiEsc(bspWhy)}">BSP: ${kiEsc(bspWhy)}</span>`);
@@ -12202,8 +12359,8 @@ const __twsOuter = (() => {
     if (poStats.busy || (poStats.at && Date.now() - poStats.at < 60000)) return;
     poStats.busy = true;
     poStats.at = Date.now();
-    Promise.all([fetchFFScouterStats([id]).catch(() => ({ map: {} })), fetchBspStats([id]).catch(() => ({ map: {} }))])
-      .then(([ffR, bspR]) => {
+    Promise.all([fetchFFScouterStats([id]).catch(() => ({ map: {} })), fetchBspStats([id]).catch(() => ({ map: {} })), tsOn() ? tsLoadUser(id).catch(() => null) : Promise.resolve(null)])
+      .then(([ffR, bspR, spy]) => {
         if (poStats.id !== id) return;
         // Say why BSP is missing (this browser has no BSP key / BSP had no
         // prediction / an error), rather than leaving it out silently.
@@ -12213,7 +12370,7 @@ const __twsOuter = (() => {
           else if (bspR.error) bspWhy = String(bspR.error).slice(0, 80);
           else bspWhy = 'no prediction for this player';
         }
-        poStats.html = poStatsHtml(ffR.map[id], bspR.map[id], bspWhy);
+        poStats.html = poStatsHtml(ffR.map[id], bspR.map[id], bspWhy, spy || tsSpyFor(id));
         el.innerHTML = poStats.html || '📊 No estimate for this player (add an FFScouter or BSP key in Settings).';
       })
       .finally(() => { poStats.busy = false; });
