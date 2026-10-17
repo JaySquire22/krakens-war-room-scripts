@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Sandbox War Room 🧪
 // @namespace    jay-torn-war-script-sandbox
-// @version      1.99.23
+// @version      1.99.24
 // @downloadURL  https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @updateURL    https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @description  [SANDBOX - test build, not for general use] Enemy hospital timers, quick attack links, and a chain timeout alert overlay for Torn faction war pages. Works in Tampermonkey (Firefox) and Torn PDA.
@@ -581,7 +581,7 @@ const __twsOuter = (() => {
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.23';
+  const SCRIPT_VERSION = '1.99.24';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -720,6 +720,7 @@ const __twsOuter = (() => {
     { key: 'miniLogo', group: 'Panel & pages', label: 'Minimised panel shows the Kraken logo icon', hint: 'Off = the minimised panel is the plain title bar.' },
 
     // --- Header buttons ---
+    { key: 'fitHeader', group: 'Header buttons', label: '\ud83d\udcf1 Keep the header buttons clear on narrow screens', hint: 'When there isn\u2019t room: the title shrinks to \ud83d\udc19 first, then the enemy faction name is hidden (it\u2019s only shown when it fits in full).' },
     { key: 'btnBlood', group: 'Header buttons', label: '🩸 Blood bag / medical armoury button' },
     { key: 'btnItems', group: 'Header buttons', label: 'Grenade button: quick link to Items → Temporary' },
     { key: 'tempPreload', group: 'Header buttons', label: 'Keep Items \u2192 Temporary pre-loaded for the grenade button (opens instantly) (PC Mode)', hint: 'Loads once in the background and stays loaded, with no timed reloads. Use \u21bb in the pop-out to refresh it. Needs the Items pop-out on.', requires: 'btnItems' },
@@ -760,6 +761,7 @@ const __twsOuter = (() => {
     { key: 'popoutAttacks', group: 'Pop-out windows', label: 'ATK opens the attack page in a pop-out', requires: 'popouts' },
     { key: 'popoutArmoury', group: 'Pop-out windows', label: '🩸 opens the medical armoury in a pop-out', hint: 'Used when One-tap use (below) is off.', requires: 'popouts' },
     { key: 'popoutItems', group: 'Pop-out windows', label: 'Grenade button opens Items → Temporary in a pop-out', requires: 'popouts' },
+    { key: 'popoutFit', group: 'Pop-out windows', label: '\ud83d\udcd0 Fit pop-outs to the screen width', hint: 'Keeps the pop-out on screen and shrinks a page that is wider than the pop-out (e.g. the attack page on narrow phones) so nothing is cut off.', requires: 'popouts' },
     { key: 'popoutIntel', group: 'Pop-out windows', label: '\ud83d\udc19 Full Kraken Intel inside pop-outs (loadouts, armour, temp & job warnings, profile panel)', hint: 'Runs a small copy of the Intel part of War Room inside the pop-out page, on Torn PDA too. Off = pop-outs only get the loadout shown in Torn\u2019s own display.', requires: 'popouts' },
     { key: 'popoutStats', group: 'Pop-out windows', label: '\ud83d\udcca Estimated stats (FFScouter / BSP) in the pop-out bar', hint: 'Other stat scripts can\u2019t run inside a pop-out, so War Room shows FF and the estimate for the player on a profile or attack page. Needs Estimated battle stats on.', requires: 'popouts' },
     { key: 'popoutBounty', group: 'Pop-out windows', label: '💰 Bounty icon opens the bounty page in a pop-out', hint: 'Needed for the form to be filled in for you; otherwise the amount is copied instead.', requires: 'popouts' },
@@ -8542,6 +8544,17 @@ const __twsOuter = (() => {
     #tws-panel.tws-mini.tws-mini-dock #tws-header { padding: 0; }
     #tws-panel.tws-mini.tws-mini-dock #tws-logo { width: var(--tws-dock-size, 34px); height: var(--tws-dock-size, 34px); box-shadow: 0 0 5px rgba(110,190,220,0.5); }
 
+    /* Header fit: the buttons never shrink; the title becomes the octopus and
+       the enemy name hides (never cut short) when there isn't room. */
+    #tws-header #tws-hbtns { flex-shrink: 0; white-space: nowrap; }
+    #tws-title .tws-title-short { display: none; }
+    #tws-header.tws-hfit #tws-title, #tws-header.tws-hfit .tws-enemy-name { flex-shrink: 0; }
+    #tws-header.tws-hfit .tws-enemy-name { max-width: none; text-overflow: clip; }
+    #tws-header.tws-hfit #tws-hflash { flex-shrink: 1; min-width: 0; }
+    #tws-header.tws-h-short #tws-title .tws-title-txt { display: none; }
+    #tws-header.tws-h-short #tws-title .tws-title-short { display: inline; font-size: 18px; vertical-align: middle; }
+    #tws-header.tws-h-noenemy .tws-enemy-name { display: none !important; }
+    #tws-header.tws-h-noclock #tws-clock { display: none !important; }
     .tws-enemy-name {
       color: #999;
       font-size: 10px;
@@ -9948,8 +9961,8 @@ const __twsOuter = (() => {
     panel.innerHTML = `
       <div id="tws-header">
         <img id="tws-logo" src="${LOGO_DATA_URI}" alt="🐙" draggable="false">
-        <b id="tws-title">Sandbox War Room 🧪<span id="tws-clock" class="tws-clock" title="Torn City Time (TCT)"></span></b><span id="tws-enemy-name" class="tws-enemy-name"></span>
-        <span>
+        <b id="tws-title"><span class="tws-title-txt">Sandbox War Room 🧪</span><span class="tws-title-short">\ud83d\udc19</span><span id="tws-clock" class="tws-clock" title="Torn City Time (TCT)"></span></b><span id="tws-enemy-name" class="tws-enemy-name"></span>
+        <span id="tws-hbtns">
           <span class="tws-energy" id="tws-energy" title="Energy"><span class="tws-energy-top"><svg class="tws-energy-bolt" viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path fill="#6aa22a" d="M13.5 1 4 13.5h6.2L8.8 23 20 9.6h-6.4z"/></svg><span class="tws-energy-txt">–</span></span><span class="tws-energy-track"><span class="tws-energy-fill"></span></span></span>
           <span class="tws-energy tws-drug" id="tws-drug" title="Drug cooldown"><span class="tws-energy-top">${DRUG_SVG}<span class="tws-energy-txt">–</span></span><span class="tws-energy-track"><span class="tws-energy-fill"></span></span></span>
           <a class="tws-rev-btn" id="tws-rev-btn" target="_blank" href="#" title="Quick revive">Rev</a>
@@ -10692,6 +10705,7 @@ const __twsOuter = (() => {
         ? `vs ${enemyFactionName || 'detecting...'}`
         : '';
     }
+    try { fitHeader(); } catch (e) { /* ignore */ }
 
     if (collapsed || showSettings) closeTravelPopup();
     if (collapsed) {
@@ -12030,6 +12044,97 @@ const __twsOuter = (() => {
     }, 700);
   }
 
+  // ---- Header fit ----
+  const hdrFit = { sig: '' };
+  function fitHeader(force) {
+    if (!panel) return;
+    const h = panel.querySelector('#tws-header');
+    if (!h) return;
+    const on = featureOn('fitHeader');
+    h.classList.toggle('tws-hfit', on);
+    if (!on) { h.classList.remove('tws-h-short', 'tws-h-noenemy', 'tws-h-noclock'); hdrFit.sig = ''; return; }
+    if (panel.classList.contains('tws-mini') || !h.clientWidth) return;
+    const en = h.querySelector('#tws-enemy-name');
+    const pill = h.querySelector('#tws-hflash');
+    const sig = [h.clientWidth, en ? en.textContent : '', pill ? `${pill.style.display}|${pill.textContent.length}` : '', panel.className].join('~');
+    if (!force && sig === hdrFit.sig) return;
+    hdrFit.sig = sig;
+    h.classList.remove('tws-h-short', 'tws-h-noenemy', 'tws-h-noclock');
+    const over = () => h.scrollWidth > h.clientWidth + 1;
+    if (!over()) return;
+    h.classList.add('tws-h-short');
+    if (!over()) return;
+    h.classList.add('tws-h-noenemy');
+    if (!over()) return;
+    h.classList.add('tws-h-noclock');
+  }
+  function watchHeaderFit() {
+    if (IN_POPOUT_FRAME || window.top !== window.self) return;
+    try {
+      const RO = window.ResizeObserver;
+      const h = panel && panel.querySelector('#tws-header');
+      if (RO && h) new RO(() => { try { fitHeader(); } catch (e) { /* ignore */ } }).observe(h);
+    } catch (e) { /* ignore */ }
+    __nativeSetInterval(() => { try { fitHeader(); } catch (e) { /* ignore */ } }, 1000);
+  }
+
+  // ---- Pop-out fit to screen ----
+  // Keeps the pop-out inside the screen, and when the page inside is wider
+  // than the pop-out (Torn's attack page on narrow phones) lays it out at the
+  // width it needs and scales it down to fit, so nothing is cut off.
+  function clearFrameFit(f) {
+    if (!f || !f.__fitS) return;
+    f.__fitS = 0;
+    ['flex', 'width', 'height', 'transform', 'transformOrigin', 'maxWidth'].forEach((k) => { f.style[k] = ''; });
+  }
+  function fitPopoutToScreen() {
+    if (!popout || popout.root.style.display !== 'flex') return;
+    const root = popout.root;
+    const frames = [popout.mainFrame].concat(Object.values(popout.preFrames || {}));
+    if (!featureOn('popoutFit')) { frames.forEach(clearFrameFit); return; }
+    // 1) the window itself stays on screen
+    const vv = window.visualViewport;
+    const vw = Math.floor(vv ? vv.width : window.innerWidth);
+    const r = root.getBoundingClientRect();
+    if (vw > 0 && (r.left < 0 || r.right > vw + 1)) {
+      const left = Math.max(0, Math.min(r.left, vw - 120));
+      root.style.left = `${Math.round(left)}px`;
+      root.style.width = `${Math.max(120, Math.floor(vw - left - 2))}px`;
+    }
+    frames.forEach((f) => { if (f && f !== popout.frame) clearFrameFit(f); });
+    const f = popout.frame;
+    if (!f || root.classList.contains('tws-po-min') || f.style.display === 'none') return;
+    if (!pageFocused()) return;
+    let d;
+    try { d = f.contentDocument; } catch (e) { return; }
+    if (!d || !d.documentElement || !d.body) return;
+    if (f.__fitDoc !== d) { f.__fitDoc = d; f.__fitNeed = 0; clearFrameFit(f); return; }
+    // 2) the page inside fits the pop-out's width
+    const W = root.clientWidth;
+    if (W < 100) return;
+    let other = 0;
+    Array.from(root.children).forEach((c) => {
+      if (c.tagName === 'IFRAME' || c.classList.contains('tws-po-rs')) return;
+      other += c.offsetHeight || 0;
+    });
+    const H = Math.max(100, root.clientHeight - other);
+    const V = f.__fitS ? (parseFloat(f.style.width) || W) : W;
+    const M = Math.max(d.documentElement.scrollWidth || 0, d.body.scrollWidth || 0);
+    if (M > V + 2) f.__fitNeed = Math.max(f.__fitNeed || 0, Math.min(M, Math.round(W / 0.55)));
+    const need = Math.max(W, f.__fitNeed || 0);
+    const sc = W / need;
+    if (sc > 0.995) { clearFrameFit(f); return; }
+    const key = `${need}x${Math.round(H / sc)}`;
+    if (f.__fitS && f.__fitKey === key) return;
+    f.__fitS = sc;
+    f.__fitKey = key;
+    Object.assign(f.style, { flex: 'none', maxWidth: 'none', width: `${need}px`, height: `${Math.round(H / sc)}px`, transform: `scale(${sc.toFixed(4)})`, transformOrigin: '0 0' });
+  }
+  function watchPopoutFit() {
+    if (IN_POPOUT_FRAME || window.top !== window.self) return;
+    __nativeSetInterval(() => { try { fitPopoutToScreen(); } catch (e) { /* ignore */ } }, 400);
+  }
+
   // ---- Kraken Intel inside pop-out pages ----
   // Tampermonkey runs its own copy in the pop-out page. Torn PDA doesn't run
   // scripts in frames, so War Room starts the copy from here: the same code,
@@ -12113,12 +12218,14 @@ const __twsOuter = (() => {
     kiWatchPopoutFights(); // PC Mode: fights opened in a War Room pop-out, from any page
     installProfileAttack(); // profile Attack button always works (page + pop-out)
     bootPopoutIntel(); // Intel inside pop-out pages (Torn PDA: scripts don't run there)
+    watchPopoutFit(); // pop-outs fit the screen width
     watchPopoutStats(); // FFScouter / BSP estimate in the pop-out bar
 
     // "Run on every Torn page" off -> behave as before: only on faction pages.
     if (!featureOn('everyPage') && !onFactionPage()) return;
 
     buildPanelSkeleton();
+    watchHeaderFit();
 
     if (!getApiKey()) {
       showSettings = true;
