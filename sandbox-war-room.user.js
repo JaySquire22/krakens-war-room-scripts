@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Sandbox War Room 🧪
 // @namespace    jay-torn-war-script-sandbox
-// @version      1.99.22
+// @version      1.99.23
 // @downloadURL  https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @updateURL    https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @description  [SANDBOX - test build, not for general use] Enemy hospital timers, quick attack links, and a chain timeout alert overlay for Torn faction war pages. Works in Tampermonkey (Firefox) and Torn PDA.
@@ -41,8 +41,50 @@
 // manually-entered one stored via GM_setValue instead.
 const PDA_INJECTED_KEY = "###PDA-APIKEY###";
 
-(function () {
+// What the page's own globals are, captured once so War Room can also start
+// a copy of itself inside a pop-out page (Torn PDA doesn't run scripts in
+// frames). Normal runs use exactly these same objects.
+const __twsOuter = (() => {
+  const o = { win: window, doc: document, loc: location, hist: history };
+  try { o.uw = typeof unsafeWindow !== 'undefined' ? unsafeWindow : undefined; } catch (e) { o.uw = undefined; }
+  try { o.addStyle = typeof GM_addStyle !== 'undefined' ? GM_addStyle : undefined; } catch (e) { o.addStyle = undefined; }
+  try { o.ss = sessionStorage; } catch (e) { o.ss = undefined; }
+  o.gcs = getComputedStyle; o.si = setInterval; o.st = setTimeout; o.ci = clearInterval; o.ct = clearTimeout;
+  o.El = Element; o.ME = MouseEvent;
+  try { o.PO = PerformanceObserver; } catch (e) { o.PO = undefined; }
+  return o;
+})();
+
+(function __twsMain(__twsCtx) {
   'use strict';
+
+  // __twsCtx = { win, doc, frame }: this copy runs for a pop-out page.
+  const __twsAlive = __twsCtx
+    ? () => { try { return __twsCtx.frame.isConnected && __twsCtx.frame.contentDocument === __twsCtx.doc; } catch (e) { return false; } }
+    : null;
+  const window = __twsCtx ? __twsCtx.win : __twsOuter.win;
+  const document = __twsCtx ? __twsCtx.doc : __twsOuter.doc;
+  const location = __twsCtx ? __twsCtx.win.location : __twsOuter.loc;
+  const history = __twsCtx ? __twsCtx.win.history : __twsOuter.hist;
+  const unsafeWindow = __twsCtx ? __twsCtx.win : __twsOuter.uw;
+  const sessionStorage = __twsCtx ? (() => { try { return __twsCtx.win.sessionStorage; } catch (e) { return undefined; } })() : __twsOuter.ss;
+  const getComputedStyle = __twsCtx ? (el, p) => __twsCtx.win.getComputedStyle(el, p) : __twsOuter.gcs;
+  const Element = __twsCtx ? __twsCtx.win.Element : __twsOuter.El;
+  const MouseEvent = __twsCtx ? __twsCtx.win.MouseEvent : __twsOuter.ME;
+  const PerformanceObserver = __twsCtx ? __twsCtx.win.PerformanceObserver : __twsOuter.PO;
+  const GM_addStyle = __twsCtx
+    ? (css) => {
+      const put = () => {
+        const st = document.createElement('style');
+        st.textContent = css;
+        (document.head || document.documentElement).appendChild(st);
+        return st;
+      };
+      if (document.documentElement) return put();
+      document.addEventListener('DOMContentLoaded', put);
+      return null;
+    }
+    : __twsOuter.addStyle;
 
   // Pop-out windows load Torn pages inside an iframe on the same origin.
   // This script matches every Torn page, so without this guard it would
@@ -54,7 +96,11 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
     IN_POPOUT_FRAME = window.top !== window.self && !!(window.frameElement && window.frameElement.closest && window.frameElement.closest('#tws-popout'));
   } catch (e) { IN_POPOUT_FRAME = false; }
   if (window.top !== window.self && !IN_POPOUT_FRAME) return;
-  if (IN_POPOUT_FRAME) { try { (typeof unsafeWindow !== 'undefined' ? unsafeWindow : window).__twsFrameKI = true; } catch (e) { /* ignore */ } }
+  if (IN_POPOUT_FRAME) {
+    let fw = window;
+    try { fw = (typeof unsafeWindow !== 'undefined' && unsafeWindow) ? unsafeWindow : window; } catch (e) { /* ignore */ }
+    try { if (fw.__twsFrameKI) return; fw.__twsFrameKI = true; } catch (e) { /* ignore */ }
+  }
 
   // ---------------------------------------------------------------------
   // PERFORMANCE MONITOR (PC Mode diagnostics)
@@ -63,9 +109,15 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
   // freezes and how slow clicks are, so we can see what (if anything) of
   // ours is making the page slow. Badge bottom-left; tap it for a report.
   // ---------------------------------------------------------------------
-  const __nativeSetInterval = window.setInterval.bind(window);
-  const __nativeSetTimeout = window.setTimeout.bind(window);
-  const __nativeRaf = window.requestAnimationFrame ? window.requestAnimationFrame.bind(window) : null;
+  const __nativeSetInterval = __twsAlive
+    ? (fn, ms) => { const id = __twsOuter.si(function () { if (!__twsAlive()) { __twsOuter.ci(id); return undefined; } return fn.apply(this, arguments); }, ms); return id; }
+    : window.setInterval.bind(window);
+  const __nativeSetTimeout = __twsAlive
+    ? (fn, ms) => __twsOuter.st(function () { if (!__twsAlive()) return undefined; return fn.apply(this, arguments); }, ms)
+    : window.setTimeout.bind(window);
+  const __nativeRaf = __twsAlive
+    ? (fn) => __twsOuter.st(() => { if (__twsAlive()) fn(performance.now()); }, 16)
+    : (window.requestAnimationFrame ? window.requestAnimationFrame.bind(window) : null);
   const __perf = {
     start: performance.now(), s: {}, lagMax: 0, lagN: 0, lagMs: 0,
     longN: 0, longMs: 0, longMax: 0, longOk: false,
@@ -529,7 +581,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.22';
+  const SCRIPT_VERSION = '1.99.23';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -708,6 +760,8 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
     { key: 'popoutAttacks', group: 'Pop-out windows', label: 'ATK opens the attack page in a pop-out', requires: 'popouts' },
     { key: 'popoutArmoury', group: 'Pop-out windows', label: '🩸 opens the medical armoury in a pop-out', hint: 'Used when One-tap use (below) is off.', requires: 'popouts' },
     { key: 'popoutItems', group: 'Pop-out windows', label: 'Grenade button opens Items → Temporary in a pop-out', requires: 'popouts' },
+    { key: 'popoutIntel', group: 'Pop-out windows', label: '\ud83d\udc19 Full Kraken Intel inside pop-outs (loadouts, armour, temp & job warnings, profile panel)', hint: 'Runs a small copy of the Intel part of War Room inside the pop-out page, on Torn PDA too. Off = pop-outs only get the loadout shown in Torn\u2019s own display.', requires: 'popouts' },
+    { key: 'popoutStats', group: 'Pop-out windows', label: '\ud83d\udcca Estimated stats (FFScouter / BSP) in the pop-out bar', hint: 'Other stat scripts can\u2019t run inside a pop-out, so War Room shows FF and the estimate for the player on a profile or attack page. Needs Estimated battle stats on.', requires: 'popouts' },
     { key: 'popoutBounty', group: 'Pop-out windows', label: '💰 Bounty icon opens the bounty page in a pop-out', hint: 'Needed for the form to be filled in for you; otherwise the amount is copied instead.', requires: 'popouts' },
 
     // --- Blood bags ---
@@ -2381,12 +2435,25 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
   }
 
   // Torn's rule: only read the page while the player is looking at it.
+  function popoutFrameShowing() {
+    try {
+      const fe = window.frameElement;
+      const r = fe && fe.closest && fe.closest('#tws-popout');
+      return !!r && r.style.display === 'flex' && !r.classList.contains('tws-po-min') && fe.style.display !== 'none';
+    } catch (e) { return false; }
+  }
   function pageFocused() {
-    return document.visibilityState === 'visible' && document.hasFocus();
+    if (document.visibilityState !== 'visible') return false;
+    if (document.hasFocus()) return true;
+    // Inside a War Room pop-out: the pop-out is part of the page you're on.
+    if (IN_POPOUT_FRAME) {
+      try { return window.top.document.visibilityState === 'visible' && window.top.document.hasFocus() && popoutFrameShowing(); } catch (e) { return false; }
+    }
+    return false;
   }
 
   function kiVisibleAndFocused() {
-    return document.visibilityState === 'visible' && document.hasFocus();
+    return pageFocused();
   }
 
   function kiBuildCapture(data, expectedTarget) {
@@ -3747,7 +3814,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
     }
   }
   function kiWatchPopoutFights() {
-    if (!pcMode()) return;
+    if (IN_POPOUT_FRAME) return;
     setInterval(() => {
       if (!featureOn('kiContribute') && !featureOn('kiShowIntel')) return;
       document.querySelectorAll('#tws-popout iframe').forEach((f) => {
@@ -3827,6 +3894,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
           let data;
           try { data = await r.clone().json(); } catch (e) { return r; }
           if (!kiObjectRecord(data)) return r;
+          try { win.__twsAtkData = data; if (typeof win.__twsFrameData === 'function') win.__twsFrameData(data); } catch (e) { /* ignore */ }
           const live = kiBuildCapture(data, targetId);
           if (live) {
             kiSetTabIntel(targetId, live, true, '');
@@ -3835,6 +3903,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
           }
           const intel = await intelP;
           if (!intel) return r;
+          try { win.__twsAtkIntel = intel; if (typeof win.__twsFrameIntel === 'function') win.__twsFrameIntel(intel); } catch (e) { /* ignore */ }
           const patched = kiPatchAttackData(data, intel);
           if (patched === data) return r;
           kiSetTabIntel(targetId, intel, false, '');
@@ -3995,6 +4064,33 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
     setCfg('tws_kal_notice_shown', true);
     try { showToast('KAL Loadout Revealer is on, so War Room\u2019s loadout intel stays off on attack & profile pages (they clash).'); } catch (e) { /* ignore */ }
   }
+  // Inside a pop-out the main page hooks the fight first (so it can add the
+  // saved loadout to Torn's display), then hands the data over here. Shown
+  // only -- the main page already saves and shares it.
+  function kiFrameTakeData(targetId) {
+    const showIntel = (intel) => {
+      if (!intel || Number(intel.target_id) !== Number(targetId)) return;
+      if (kiState.latest && kiState.latest.target_id === intel.target_id && Date.parse(kiState.latest.observed_at) > Date.parse(intel.observed_at)) return;
+      kiState.latest = intel;
+      kiScheduleAttackEquipmentRender();
+      kiRefreshLatestArmourDetails().then((en) => { if (en) kiScheduleAttackEquipmentRender(); }).catch(() => {});
+    };
+    const takeData = (data) => {
+      if (!kiObjectRecord(data)) return;
+      const cap = kiBuildCapture(data, targetId);
+      if (cap) { showIntel(cap); return; }
+      const saved = kiLatestStoredCapture(targetId);
+      if (saved) showIntel(saved);
+      else if (featureOn('kiShowIntel')) kiFetchSharedCapture(targetId).then(showIntel).catch(() => {});
+    };
+    try {
+      KI_W.__twsFrameData = (d) => { try { takeData(d); } catch (e) { /* ignore */ } };
+      KI_W.__twsFrameIntel = (i) => { try { showIntel(i); } catch (e) { /* ignore */ } };
+      if (KI_W.__twsAtkData) takeData(KI_W.__twsAtkData);
+      if (KI_W.__twsAtkIntel) showIntel(KI_W.__twsAtkIntel);
+    } catch (e) { /* ignore */ }
+  }
+
   function initKrakenIntel() {
     const page = kiPageDetails();
     if (page.type === 'unsupported' || !page.targetId) return;
@@ -4034,6 +4130,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
       kiObserveAttackLayout();
     }
     if (page.type === 'profile' && !kiIdle) kiMountProfilePanel();
+    if (IN_POPOUT_FRAME && page.type === 'attack') kiFrameTakeData(page.targetId);
     kiStartSharedSync();
     kiRefreshLatestArmourDetails().then(() => {
       kiScheduleAttackEquipmentRender();
@@ -6532,6 +6629,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
         </span>
       </div>
       <div id="tws-po-life" style="display:none;"><span class="tws-po-life-txt">\u2764 \u2013</span><span class="tws-po-life-bar"><span class="tws-po-life-fill"></span></span></div>
+      <div id="tws-po-stats" style="display:none;"></div>
       <div id="tws-temp-quick" style="display:none;"></div>
       <div id="tws-po-msg" style="display:none;"></div>
       <iframe id="tws-po-frame"></iframe>
@@ -9017,6 +9115,8 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
     #tws-temp-quick .tws-tq-btn small { display: block; font-weight: normal; font-size: 10px; color: #b5d8b5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     #tws-temp-quick .tws-tq-btn.tws-tq-none { background: #2a2a2a; border-color: #444; color: #888; }
     #tws-temp-quick .tws-tq-btn.tws-tq-none small { color: #777; }
+    #tws-po-stats { padding: 3px 10px 4px; background: #1a1a1a; border-bottom: 1px solid #333; font: 12px Arial, sans-serif; color: #ccc; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    #tws-po-stats b { color: #fff; }
     #tws-po-life { display: flex; align-items: center; gap: 8px; padding: 3px 10px 5px; background: #1a1a1a; border-bottom: 1px solid #333; font: bold 12px Arial, sans-serif; color: #ddd; }
     #tws-po-life .tws-po-life-txt { white-space: nowrap; }
     #tws-po-life .tws-po-life-bar { flex: 1; height: 7px; background: #333; border-radius: 4px; overflow: hidden; }
@@ -11877,6 +11977,13 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
       if (e) { e.preventDefault(); e.stopImmediatePropagation(); }
       // In the pop-out: get the enemy loadout ready for the fight first.
       try { if (win !== window && win.frameElement) kiArmPopoutFrame(win.frameElement, attackUrl(id)); } catch (e2) { /* ignore */ }
+      // A pop-out's own copy: ask the main page to get the loadout ready.
+      try {
+        if (win === window && IN_POPOUT_FRAME && window.frameElement) {
+          const tw = KI_W.top;
+          if (tw && typeof tw.__twsArmPopout === 'function') tw.__twsArmPopout(window.frameElement, attackUrl(id));
+        }
+      } catch (e2) { /* ignore */ }
       win.location.href = attackUrl(id); // same window: the pop-out stays the pop-out
     };
     if (!doc.getElementById('tws-profile-atk-css')) {
@@ -11923,11 +12030,90 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
     }, 700);
   }
 
+  // ---- Kraken Intel inside pop-out pages ----
+  // Tampermonkey runs its own copy in the pop-out page. Torn PDA doesn't run
+  // scripts in frames, so War Room starts the copy from here: the same code,
+  // pointed at the pop-out's page, stopping when that page goes away.
+  function bootPopoutIntel() {
+    if (IN_POPOUT_FRAME || window.top !== window.self) return;
+    try { KI_W.__twsArmPopout = (frame, url) => { try { kiArmPopoutFrame(frame, url); } catch (e) { /* ignore */ } }; } catch (e) { /* ignore */ }
+    __nativeSetInterval(() => {
+      if (!popout || popout.root.style.display !== 'flex') return;
+      if (!featureOn('popoutIntel')) return;
+      popout.root.querySelectorAll('iframe').forEach((f) => {
+        let w; let d; let href = '';
+        try { w = f.contentWindow; d = f.contentDocument; href = String(w.location.href); } catch (e) { return; }
+        if (!w || !d || f.__twsBootDoc === d) return;
+        if (!/^https:\/\/www\.torn\.com\//.test(href)) return;
+        if (d.readyState === 'loading') return;
+        if (!/[?&]sid=attack\b/i.test(href) && !/\/profiles\.php/i.test(href)) { f.__twsBootDoc = d; return; }
+        if (w.__twsFrameKI) { f.__twsBootDoc = d; return; }
+        if (!IS_PDA) {
+          // Give Tampermonkey's own copy a moment first.
+          if (f.__twsWaitDoc !== d) { f.__twsWaitDoc = d; f.__twsWaitAt = Date.now(); return; }
+          if (d.readyState !== 'complete' || Date.now() - f.__twsWaitAt < 1500) return;
+        }
+        f.__twsBootDoc = d;
+        try { __twsMain({ win: w, doc: d, frame: f }); } catch (e) { console.warn('[War Room] pop-out Intel failed', e); }
+      });
+    }, 120);
+  }
+
+  // ---- Estimated stats in the pop-out bar ----
+  function popoutTargetId() {
+    try {
+      const href = String(popout.frame.contentWindow.location.href);
+      let m = href.match(/[?&]sid=attack\b.*?[?&]user2ID=(\d+)/i) || href.match(/sid=attack.*user2ID=(\d+)/i);
+      if (m) return Number(m[1]);
+      m = /\/profiles\.php/i.test(href) && href.match(/[?&]XID=(\d+)/i);
+      if (m) return Number(m[1]);
+    } catch (e) { /* not readable */ }
+    return 0;
+  }
+  const poStats = { id: 0, html: '', busy: false, at: 0 };
+  function poStatsHtml(ffE, bspE) {
+    const parts = [];
+    const ff = fairFightOf(ffE || bspE);
+    if (typeof ff === 'number' && isFinite(ff)) {
+      const c = ffColour(ff);
+      parts.push(`<b style="${c ? `color:${c};` : ''}">FF ${ff.toFixed(2)}</b>`);
+    }
+    if (ffE && ffE.bs_estimate_human) parts.push(`FFScouter <b>${kiEsc(ffE.bs_estimate_human)}</b>`);
+    if (bspE && bspE.bs_estimate_human) parts.push(`BSP <b>${kiEsc(bspE.bs_estimate_human)}</b>${bspE.source === 'bsp-spy' ? ' (spy)' : ''}`);
+    return parts.length ? `📊 ${parts.join(' · ')}` : '';
+  }
+  function updatePopoutStats() {
+    if (!popout) return;
+    const el = popout.root.querySelector('#tws-po-stats');
+    if (!el) return;
+    const on = featureOn('popoutStats') && featureOn('ffStats') && popout.root.style.display === 'flex';
+    const id = on ? popoutTargetId() : 0;
+    if (!id) { el.style.display = 'none'; poStats.id = 0; return; }
+    if (id !== poStats.id) { poStats.id = id; poStats.html = ''; poStats.at = 0; el.innerHTML = '📊 Estimating…'; }
+    el.style.display = 'block';
+    if (poStats.busy || (poStats.at && Date.now() - poStats.at < 60000)) return;
+    poStats.busy = true;
+    poStats.at = Date.now();
+    Promise.all([fetchFFScouterStats([id]).catch(() => ({ map: {} })), fetchBspStats([id]).catch(() => ({ map: {} }))])
+      .then(([ffR, bspR]) => {
+        if (poStats.id !== id) return;
+        poStats.html = poStatsHtml(ffR.map[id], bspR.map[id]);
+        el.innerHTML = poStats.html || '📊 No estimate for this player (add an FFScouter or BSP key in Settings).';
+      })
+      .finally(() => { poStats.busy = false; });
+  }
+  function watchPopoutStats() {
+    if (IN_POPOUT_FRAME || window.top !== window.self) return;
+    __nativeSetInterval(() => { try { updatePopoutStats(); } catch (e) { /* ignore */ } }, 700);
+  }
+
   function startScriptInner() {
     seedKrakenIntelConsent();
     initKrakenIntel(); // independent of the main panel's page gating below
     kiWatchPopoutFights(); // PC Mode: fights opened in a War Room pop-out, from any page
     installProfileAttack(); // profile Attack button always works (page + pop-out)
+    bootPopoutIntel(); // Intel inside pop-out pages (Torn PDA: scripts don't run there)
+    watchPopoutStats(); // FFScouter / BSP estimate in the pop-out bar
 
     // "Run on every Torn page" off -> behave as before: only on faction pages.
     if (!featureOn('everyPage') && !onFactionPage()) return;
@@ -11989,7 +12175,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
 
   const safeInit = IN_POPOUT_FRAME
     ? () => {
-      if (!pcMode()) return; // pop-out Intel is a PC Mode feature
+      if (!featureOn('popoutIntel')) return;
       try { seedKrakenIntelConsent(); initKrakenIntel(); installProfileAttack(); } catch (e) { console.warn('[War Room pop-out] Intel failed', e); }
     }
     : () => { Promise.resolve().then(init).catch((e) => reportCrash('init', e)); };
