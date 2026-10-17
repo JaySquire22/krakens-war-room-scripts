@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Sandbox War Room 🧪
 // @namespace    jay-torn-war-script-sandbox
-// @version      1.99.25
+// @version      1.99.26
 // @downloadURL  https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @updateURL    https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @description  [SANDBOX - test build, not for general use] Enemy hospital timers, quick attack links, and a chain timeout alert overlay for Torn faction war pages. Works in Tampermonkey (Firefox) and Torn PDA.
@@ -581,7 +581,7 @@ const __twsOuter = (() => {
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.25';
+  const SCRIPT_VERSION = '1.99.26';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -737,6 +737,7 @@ const __twsOuter = (() => {
     { key: 'travelTimers', group: 'Roster display', label: '✈ Estimated landing timers for travellers', hint: 'Assumes Airstrip unless the player\u2019s usual method has been learned from a past flight. Tap a travel timer to see every method, and tap a method to make it that member\u2019s default.' },
     { key: 'travelShared', group: 'Roster display', label: '✈ Shared travel tracking (Kraken server)', hint: 'During a war the server watches the enemy roster once a minute, so take-offs are caught even when nobody has the panel open. Only the enemy faction ID and your player ID are sent.', requires: 'travelTimers' },
     { key: 'activityHistory', group: 'Roster display', label: '\ud83d\udcca Activity history (Kraken server)', hint: 'Above the enemy list: how many of them are usually online at this hour, and the quietest hours to hit them. Learned by the Kraken server over time; only the enemy faction ID and your player ID are sent.' },
+    { key: 'activityWarOnly', group: 'Roster display', label: '\u2694 Activity history: wars only', hint: 'Base the \u201cusually online\u201d banner only on checks made while that faction was in a ranked war (it learns during wars). Off = all the time.', requires: 'activityHistory' },
     { key: 'ffStats', group: 'Roster display', label: 'Estimated battle stats (FFScouter or BSP)', hint: 'Off also stops the FFScouter / BSP requests. Pick which one in the main Settings tab. Stats are cached so they stay on screen.' },
     { key: 'sortBar', group: 'Roster display', label: 'Sort bar (Timer / Stats / Respect / direction)' },
     { key: 'respectSort', group: 'Roster display', label: 'Respect option in the sort bar', hint: 'Shows name, level, stats and this war\u2019s respect. Only appears during a war.', requires: 'sortBar' },
@@ -7035,15 +7036,19 @@ const __twsOuter = (() => {
     if (!featureOn('activityHistory') || !members || !members.length) return '';
     const exp = new Array(24).fill(0);
     let covered = 0;
+    const warOnly = featureOn('activityWarOnly');
     members.forEach((m) => {
       const a = activity[String(m.id)];
-      if (!a || !Array.isArray(a.p)) return;
-      if (a.p.filter((x) => x >= 0).length < 18) return; // not enough hours known yet
+      const p = a && (warOnly ? a.w : a.p); // w = checks made during ranked wars only
+      if (!Array.isArray(p)) return;
+      if (p.filter((x) => x >= 0).length < 18) return; // not enough hours known yet
       covered++;
-      a.p.forEach((x, h) => { exp[h] += Math.max(0, x); });
+      p.forEach((x, h) => { exp[h] += Math.max(0, x); });
     });
     if (covered < Math.max(3, Math.ceil(members.length * 0.5))) {
-      return '<div style="color:#888;font-size:11px;margin:4px 0 6px;text-align:center;">\ud83d\udcca Activity history is still learning this faction\u2019s hours\u2026</div>';
+      return warOnly
+        ? '<div style="color:#888;font-size:11px;margin:4px 0 6px;text-align:center;">\ud83d\udcca War activity is still learning this faction\u2019s hours (it only counts time during ranked wars)\u2026</div>'
+        : '<div style="color:#888;font-size:11px;margin:4px 0 6px;text-align:center;">\ud83d\udcca Activity history is still learning this faction\u2019s hours\u2026</div>';
     }
     const scale = members.length / covered;
     let best = 0;
@@ -7054,7 +7059,7 @@ const __twsOuter = (() => {
     }
     const nowH = new Date().getUTCHours();
     const pad = (h) => String(h % 24).padStart(2, '0');
-    return `<div style="color:#bbb;font-size:11px;margin:4px 0 6px;text-align:center;">\ud83d\udcca Usually online now: <b>~${Math.round(exp[nowH] * scale)}</b> of ${members.length} \u00b7 Quietest: <b>${pad(best)}:00\u2013${pad(best + 3)}:00 TCT</b> (~${Math.round((bestSum / 3) * scale)} on)</div>`;
+    return `<div style="color:#bbb;font-size:11px;margin:4px 0 6px;text-align:center;">\ud83d\udcca ${warOnly ? 'In wars, usually online now' : 'Usually online now'}: <b>~${Math.round(exp[nowH] * scale)}</b> of ${members.length} \u00b7 Quietest: <b>${pad(best)}:00\u2013${pad(best + 3)}:00 TCT</b> (~${Math.round((bestSum / 3) * scale)} on)</div>`;
   }
 
   // ---------------------------------------------------------------------
