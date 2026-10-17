@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Sandbox War Room 🧪
 // @namespace    jay-torn-war-script-sandbox
-// @version      1.99.24
+// @version      1.99.25
 // @downloadURL  https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @updateURL    https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @description  [SANDBOX - test build, not for general use] Enemy hospital timers, quick attack links, and a chain timeout alert overlay for Torn faction war pages. Works in Tampermonkey (Firefox) and Torn PDA.
@@ -581,7 +581,7 @@ const __twsOuter = (() => {
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.24';
+  const SCRIPT_VERSION = '1.99.25';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -9130,6 +9130,7 @@ const __twsOuter = (() => {
     #tws-temp-quick .tws-tq-btn.tws-tq-none small { color: #777; }
     #tws-po-stats { padding: 3px 10px 4px; background: #1a1a1a; border-bottom: 1px solid #333; font: 12px Arial, sans-serif; color: #ccc; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     #tws-po-stats b { color: #fff; }
+    #tws-po-stats .tws-po-bspwhy { color: #e0a030; }
     #tws-po-life { display: flex; align-items: center; gap: 8px; padding: 3px 10px 5px; background: #1a1a1a; border-bottom: 1px solid #333; font: bold 12px Arial, sans-serif; color: #ddd; }
     #tws-po-life .tws-po-life-txt { white-space: nowrap; }
     #tws-po-life .tws-po-life-bar { flex: 1; height: 7px; background: #333; border-radius: 4px; overflow: hidden; }
@@ -12176,7 +12177,7 @@ const __twsOuter = (() => {
     return 0;
   }
   const poStats = { id: 0, html: '', busy: false, at: 0 };
-  function poStatsHtml(ffE, bspE) {
+  function poStatsHtml(ffE, bspE, bspWhy) {
     const parts = [];
     const ff = fairFightOf(ffE || bspE);
     if (typeof ff === 'number' && isFinite(ff)) {
@@ -12185,6 +12186,7 @@ const __twsOuter = (() => {
     }
     if (ffE && ffE.bs_estimate_human) parts.push(`FFScouter <b>${kiEsc(ffE.bs_estimate_human)}</b>`);
     if (bspE && bspE.bs_estimate_human) parts.push(`BSP <b>${kiEsc(bspE.bs_estimate_human)}</b>${bspE.source === 'bsp-spy' ? ' (spy)' : ''}`);
+    else if (bspWhy) parts.push(`<span class="tws-po-bspwhy" title="${kiEsc(bspWhy)}">BSP: ${kiEsc(bspWhy)}</span>`);
     return parts.length ? `📊 ${parts.join(' · ')}` : '';
   }
   function updatePopoutStats() {
@@ -12202,7 +12204,15 @@ const __twsOuter = (() => {
     Promise.all([fetchFFScouterStats([id]).catch(() => ({ map: {} })), fetchBspStats([id]).catch(() => ({ map: {} }))])
       .then(([ffR, bspR]) => {
         if (poStats.id !== id) return;
-        poStats.html = poStatsHtml(ffR.map[id], bspR.map[id]);
+        // Say why BSP is missing (this browser has no BSP key / BSP had no
+        // prediction / an error), rather than leaving it out silently.
+        let bspWhy = '';
+        if (!bspR.map[id]) {
+          if (!bspKey()) bspWhy = 'no key on this browser \u2013 add it in \u2699 Settings';
+          else if (bspR.error) bspWhy = String(bspR.error).slice(0, 80);
+          else bspWhy = 'no prediction for this player';
+        }
+        poStats.html = poStatsHtml(ffR.map[id], bspR.map[id], bspWhy);
         el.innerHTML = poStats.html || '📊 No estimate for this player (add an FFScouter or BSP key in Settings).';
       })
       .finally(() => { poStats.busy = false; });
