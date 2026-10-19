@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Krakens War Room 🐙
 // @namespace    jay-torn-war-script
-// @version      1.99.22
+// @version      1.99.30
 // @downloadURL  https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/torn-war-script.user.js
 // @updateURL    https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/torn-war-script.user.js
 // @description  Enemy hospital timers, quick attack links, and a chain timeout alert overlay for Torn faction war pages. Works in Tampermonkey (Firefox) and Torn PDA.
@@ -14,6 +14,7 @@
 // @connect      lilywaterbug.art
 // @connect      lilywaterbug.alwaysdata.net
 // @connect      what-the-f.de
+// @connect      www.tornstats.com
 // @connect      www.torn.com
 // @connect      igiyqcgpwonbbjdnvxwd.supabase.co
 // @connect      dashing-fish-54.eu-west-1.convex.site
@@ -41,8 +42,50 @@
 // manually-entered one stored via GM_setValue instead.
 const PDA_INJECTED_KEY = "###PDA-APIKEY###";
 
-(function () {
+// What the page's own globals are, captured once so War Room can also start
+// a copy of itself inside a pop-out page (Torn PDA doesn't run scripts in
+// frames). Normal runs use exactly these same objects.
+const __twsOuter = (() => {
+  const o = { win: window, doc: document, loc: location, hist: history };
+  try { o.uw = typeof unsafeWindow !== 'undefined' ? unsafeWindow : undefined; } catch (e) { o.uw = undefined; }
+  try { o.addStyle = typeof GM_addStyle !== 'undefined' ? GM_addStyle : undefined; } catch (e) { o.addStyle = undefined; }
+  try { o.ss = sessionStorage; } catch (e) { o.ss = undefined; }
+  o.gcs = getComputedStyle; o.si = setInterval; o.st = setTimeout; o.ci = clearInterval; o.ct = clearTimeout;
+  o.El = Element; o.ME = MouseEvent;
+  try { o.PO = PerformanceObserver; } catch (e) { o.PO = undefined; }
+  return o;
+})();
+
+(function __twsMain(__twsCtx) {
   'use strict';
+
+  // __twsCtx = { win, doc, frame }: this copy runs for a pop-out page.
+  const __twsAlive = __twsCtx
+    ? () => { try { return __twsCtx.frame.isConnected && __twsCtx.frame.contentDocument === __twsCtx.doc; } catch (e) { return false; } }
+    : null;
+  const window = __twsCtx ? __twsCtx.win : __twsOuter.win;
+  const document = __twsCtx ? __twsCtx.doc : __twsOuter.doc;
+  const location = __twsCtx ? __twsCtx.win.location : __twsOuter.loc;
+  const history = __twsCtx ? __twsCtx.win.history : __twsOuter.hist;
+  const unsafeWindow = __twsCtx ? __twsCtx.win : __twsOuter.uw;
+  const sessionStorage = __twsCtx ? (() => { try { return __twsCtx.win.sessionStorage; } catch (e) { return undefined; } })() : __twsOuter.ss;
+  const getComputedStyle = __twsCtx ? (el, p) => __twsCtx.win.getComputedStyle(el, p) : __twsOuter.gcs;
+  const Element = __twsCtx ? __twsCtx.win.Element : __twsOuter.El;
+  const MouseEvent = __twsCtx ? __twsCtx.win.MouseEvent : __twsOuter.ME;
+  const PerformanceObserver = __twsCtx ? __twsCtx.win.PerformanceObserver : __twsOuter.PO;
+  const GM_addStyle = __twsCtx
+    ? (css) => {
+      const put = () => {
+        const st = document.createElement('style');
+        st.textContent = css;
+        (document.head || document.documentElement).appendChild(st);
+        return st;
+      };
+      if (document.documentElement) return put();
+      document.addEventListener('DOMContentLoaded', put);
+      return null;
+    }
+    : __twsOuter.addStyle;
 
   // Pop-out windows load Torn pages inside an iframe on the same origin.
   // This script matches every Torn page, so without this guard it would
@@ -54,7 +97,11 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
     IN_POPOUT_FRAME = window.top !== window.self && !!(window.frameElement && window.frameElement.closest && window.frameElement.closest('#tws-popout'));
   } catch (e) { IN_POPOUT_FRAME = false; }
   if (window.top !== window.self && !IN_POPOUT_FRAME) return;
-  if (IN_POPOUT_FRAME) { try { (typeof unsafeWindow !== 'undefined' ? unsafeWindow : window).__twsFrameKI = true; } catch (e) { /* ignore */ } }
+  if (IN_POPOUT_FRAME) {
+    let fw = window;
+    try { fw = (typeof unsafeWindow !== 'undefined' && unsafeWindow) ? unsafeWindow : window; } catch (e) { /* ignore */ }
+    try { if (fw.__twsFrameKI) return; fw.__twsFrameKI = true; } catch (e) { /* ignore */ }
+  }
 
   // ---------------------------------------------------------------------
   // PERFORMANCE MONITOR (PC Mode diagnostics)
@@ -63,9 +110,15 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
   // freezes and how slow clicks are, so we can see what (if anything) of
   // ours is making the page slow. Badge bottom-left; tap it for a report.
   // ---------------------------------------------------------------------
-  const __nativeSetInterval = window.setInterval.bind(window);
-  const __nativeSetTimeout = window.setTimeout.bind(window);
-  const __nativeRaf = window.requestAnimationFrame ? window.requestAnimationFrame.bind(window) : null;
+  const __nativeSetInterval = __twsAlive
+    ? (fn, ms) => { const id = __twsOuter.si(function () { if (!__twsAlive()) { __twsOuter.ci(id); return undefined; } return fn.apply(this, arguments); }, ms); return id; }
+    : window.setInterval.bind(window);
+  const __nativeSetTimeout = __twsAlive
+    ? (fn, ms) => __twsOuter.st(function () { if (!__twsAlive()) return undefined; return fn.apply(this, arguments); }, ms)
+    : window.setTimeout.bind(window);
+  const __nativeRaf = __twsAlive
+    ? (fn) => __twsOuter.st(() => { if (__twsAlive()) fn(performance.now()); }, 16)
+    : (window.requestAnimationFrame ? window.requestAnimationFrame.bind(window) : null);
   const __perf = {
     start: performance.now(), s: {}, lagMax: 0, lagN: 0, lagMs: 0,
     longN: 0, longMs: 0, longMax: 0, longOk: false,
@@ -529,7 +582,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.22';
+  const SCRIPT_VERSION = '1.99.30';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -565,6 +618,8 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
     ffscouterKey: 'tws_ffscouter_key',
     statsSource: 'tws_stats_source',
     bspKey: 'tws_bsp_key',
+    tsKey: 'tws_ts_key',
+    tsCache: 'tws_ts_cache',
     bspCache: 'tws_bsp_cache',
     turboMode: 'tws_turbo_mode',
     targetIds: 'tws_target_ids',
@@ -659,6 +714,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
   // wording are edited in Advanced -> 💰 Bounty amounts.)
   const FEATURES = [
     // --- Panel & pages ---
+    { key: 'referrals', group: 'Panel & pages', label: '\ud83c\udf81 Referrals box in Settings (and the reminder during your trial)', hint: 'Enter who referred you, and see your own referral ID and the free weeks you\u2019ve earned.' },
     { key: 'everyPage', group: 'Panel & pages', label: 'Run on every Torn page (off = faction pages only)', hint: 'Keeps the timers, chain alerts, 🩸 and chat working wherever you are in Torn. Takes effect the next time a page loads.' },
     { key: 'fixedTop', group: 'Panel & pages', label: 'Keep chain timers and tabs fixed at the top of the panel', hint: 'Off = they scroll away with the member list, like older versions.' },
     { key: 'perfMonitor', group: '\ud83d\udda5\ufe0f PC Mode', label: '\ud83d\udcc8 Performance monitor badge', hint: 'PC Mode only. Small badge bottom-left showing how much time War Room uses and how long the browser freezes; tap it for a report you can copy.' },
@@ -668,6 +724,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
     { key: 'miniLogo', group: 'Panel & pages', label: 'Minimised panel shows the Kraken logo icon', hint: 'Off = the minimised panel is the plain title bar.' },
 
     // --- Header buttons ---
+    { key: 'fitHeader', group: 'Header buttons', label: '\ud83d\udcf1 Keep the header buttons clear on narrow screens', hint: 'When there isn\u2019t room: the title shrinks to \ud83d\udc19 first, then the enemy faction name is hidden (it\u2019s only shown when it fits in full).' },
     { key: 'btnBlood', group: 'Header buttons', label: '🩸 Blood bag / medical armoury button' },
     { key: 'btnItems', group: 'Header buttons', label: 'Grenade button: quick link to Items → Temporary' },
     { key: 'tempPreload', group: 'Header buttons', label: 'Keep Items \u2192 Temporary pre-loaded for the grenade button (opens instantly) (PC Mode)', hint: 'Loads once in the background and stays loaded, with no timed reloads. Use \u21bb in the pop-out to refresh it. Needs the Items pop-out on.', requires: 'btnItems' },
@@ -685,6 +742,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
     { key: 'travelShared', group: 'Roster display', label: '✈ Shared travel tracking (Kraken server)', hint: 'During a war the server watches the enemy roster once a minute, so take-offs are caught even when nobody has the panel open. Only the enemy faction ID and your player ID are sent.', requires: 'travelTimers' },
     { key: 'activityHistory', group: 'Roster display', label: '\ud83d\udcca Activity history (Kraken server)', hint: 'Above the enemy list: how many of them are usually online at this hour, and the quietest hours to hit them. Learned by the Kraken server over time; only the enemy faction ID and your player ID are sent.' },
     { key: 'ffStats', group: 'Roster display', label: 'Estimated battle stats (FFScouter or BSP)', hint: 'Off also stops the FFScouter / BSP requests. Pick which one in the main Settings tab. Stats are cached so they stay on screen.' },
+    { key: 'tsSpies', group: 'Roster display', label: '\ud83d\udd75 TornStats spies: real battle stats instead of estimates', hint: 'Needs your TornStats key in General. Uses the spies your faction has shared on TornStats (spies up to 60 days old replace the estimate; older ones are still shown with their age). Kept on this device only \u2013 never sent to the Kraken server.' },
     { key: 'sortBar', group: 'Roster display', label: 'Sort bar (Timer / Stats / Respect / direction)' },
     { key: 'respectSort', group: 'Roster display', label: 'Respect option in the sort bar', hint: 'Shows name, level, stats and this war\u2019s respect. Only appears during a war.', requires: 'sortBar' },
     { key: 'filterBar', group: 'Roster display', label: 'Filter chips (Online / Idle / Offline ...)' },
@@ -708,6 +766,9 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
     { key: 'popoutAttacks', group: 'Pop-out windows', label: 'ATK opens the attack page in a pop-out', requires: 'popouts' },
     { key: 'popoutArmoury', group: 'Pop-out windows', label: '🩸 opens the medical armoury in a pop-out', hint: 'Used when One-tap use (below) is off.', requires: 'popouts' },
     { key: 'popoutItems', group: 'Pop-out windows', label: 'Grenade button opens Items → Temporary in a pop-out', requires: 'popouts' },
+    { key: 'popoutFit', group: 'Pop-out windows', label: '\ud83d\udcd0 Fit pop-outs to the screen width', hint: 'Keeps the pop-out on screen and shrinks a page that is wider than the pop-out (e.g. the attack page on narrow phones) so nothing is cut off.', requires: 'popouts' },
+    { key: 'popoutIntel', group: 'Pop-out windows', label: '\ud83d\udc19 Full Kraken Intel inside pop-outs (loadouts, armour, temp & job warnings, profile panel)', hint: 'Runs a small copy of the Intel part of War Room inside the pop-out page, on Torn PDA too. Off = pop-outs only get the loadout shown in Torn\u2019s own display.', requires: 'popouts' },
+    { key: 'popoutStats', group: 'Pop-out windows', label: '\ud83d\udcca Estimated stats (FFScouter / BSP) in the pop-out bar', hint: 'Other stat scripts can\u2019t run inside a pop-out, so War Room shows FF and the estimate for the player on a profile or attack page. Needs Estimated battle stats on.', requires: 'popouts' },
     { key: 'popoutBounty', group: 'Pop-out windows', label: '💰 Bounty icon opens the bounty page in a pop-out', hint: 'Needed for the form to be filled in for you; otherwise the amount is copied instead.', requires: 'popouts' },
 
     // --- Blood bags ---
@@ -2381,12 +2442,25 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
   }
 
   // Torn's rule: only read the page while the player is looking at it.
+  function popoutFrameShowing() {
+    try {
+      const fe = window.frameElement;
+      const r = fe && fe.closest && fe.closest('#tws-popout');
+      return !!r && r.style.display === 'flex' && !r.classList.contains('tws-po-min') && fe.style.display !== 'none';
+    } catch (e) { return false; }
+  }
   function pageFocused() {
-    return document.visibilityState === 'visible' && document.hasFocus();
+    if (document.visibilityState !== 'visible') return false;
+    if (document.hasFocus()) return true;
+    // Inside a War Room pop-out: the pop-out is part of the page you're on.
+    if (IN_POPOUT_FRAME) {
+      try { return window.top.document.visibilityState === 'visible' && window.top.document.hasFocus() && popoutFrameShowing(); } catch (e) { return false; }
+    }
+    return false;
   }
 
   function kiVisibleAndFocused() {
-    return document.visibilityState === 'visible' && document.hasFocus();
+    return pageFocused();
   }
 
   function kiBuildCapture(data, expectedTarget) {
@@ -3221,6 +3295,10 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
       kiView.body.appendChild(status);
     }
 
+    {
+      const sh = tsSpyHtml(kiCurrentTargetId(), () => { try { kiRenderProfilePanel(); } catch (e) { /* ignore */ } });
+      if (sh) { const sw = document.createElement('div'); sw.innerHTML = sh; kiView.body.appendChild(sw.firstElementChild); }
+    }
     if (!kiState.latest) {
       if (!kiView.status) {
         const empty = document.createElement('div');
@@ -3747,7 +3825,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
     }
   }
   function kiWatchPopoutFights() {
-    if (!pcMode()) return;
+    if (IN_POPOUT_FRAME) return;
     setInterval(() => {
       if (!featureOn('kiContribute') && !featureOn('kiShowIntel')) return;
       document.querySelectorAll('#tws-popout iframe').forEach((f) => {
@@ -3827,6 +3905,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
           let data;
           try { data = await r.clone().json(); } catch (e) { return r; }
           if (!kiObjectRecord(data)) return r;
+          try { win.__twsAtkData = data; if (typeof win.__twsFrameData === 'function') win.__twsFrameData(data); } catch (e) { /* ignore */ }
           const live = kiBuildCapture(data, targetId);
           if (live) {
             kiSetTabIntel(targetId, live, true, '');
@@ -3835,6 +3914,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
           }
           const intel = await intelP;
           if (!intel) return r;
+          try { win.__twsAtkIntel = intel; if (typeof win.__twsFrameIntel === 'function') win.__twsFrameIntel(intel); } catch (e) { /* ignore */ }
           const patched = kiPatchAttackData(data, intel);
           if (patched === data) return r;
           kiSetTabIntel(targetId, intel, false, '');
@@ -3884,7 +3964,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
   function kiEnemyDrawerHtml() {
     const intel = kiTab.intel;
     let head = `<div class="tws-ew-head"><b>Enemy loadout</b><span class="tws-ew-x" data-ew-close="1">\u00d7</span></div>`;
-    if (!intel) return `${head}<div class="tws-ew-msg">${kiEsc(kiTab.status || 'Looking for intel\u2026')}</div>`;
+    if (!intel) return `${head}${tsSpyHtml(kiTab.targetId, () => { kiTab.sig = ''; try { kiRenderEnemyTab(); } catch (e) { /* ignore */ } })}<div class="tws-ew-msg">${kiEsc(kiTab.status || 'Looking for intel\u2026')}</div>`;
     const items = Array.isArray(intel.items) ? intel.items : [];
     const bySlot = (n) => items.find((i) => Number(i.equip_slot) === n && i.item_id !== 999) || null;
     const age = kiTab.live ? 'Live \u2013 seen in this fight' : `${kiObservationConfidence(intel.observed_at).label} \u00b7 seen ${kiAgo(intel.observed_at)}`;
@@ -3899,7 +3979,8 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
     }
     const job = kiJobHtml(kiTab.targetId, () => { kiTab.sig = ''; try { kiRenderEnemyTab(); } catch (e) { /* ignore */ } });
     const anyArmour = items.some((i) => kiIsArmourSlot(i));
-    return `${head}${job}<div class="tws-ew-weapons">${weapons}</div>${anyArmour ? `<div class="tws-ew-sub">Armour</div><div class="tws-ew-weapons">${armour}</div>` : ''}`;
+    const spyLine = tsSpyHtml(kiTab.targetId, () => { kiTab.sig = ''; try { kiRenderEnemyTab(); } catch (e) { /* ignore */ } });
+    return `${head}${spyLine}${job}<div class="tws-ew-weapons">${weapons}</div>${anyArmour ? `<div class="tws-ew-sub">Armour</div><div class="tws-ew-weapons">${armour}</div>` : ''}`;
   }
   function kiAgo(iso) {
     const s2 = Math.max(0, (Date.now() - Date.parse(iso)) / 1000);
@@ -3995,6 +4076,33 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
     setCfg('tws_kal_notice_shown', true);
     try { showToast('KAL Loadout Revealer is on, so War Room\u2019s loadout intel stays off on attack & profile pages (they clash).'); } catch (e) { /* ignore */ }
   }
+  // Inside a pop-out the main page hooks the fight first (so it can add the
+  // saved loadout to Torn's display), then hands the data over here. Shown
+  // only -- the main page already saves and shares it.
+  function kiFrameTakeData(targetId) {
+    const showIntel = (intel) => {
+      if (!intel || Number(intel.target_id) !== Number(targetId)) return;
+      if (kiState.latest && kiState.latest.target_id === intel.target_id && Date.parse(kiState.latest.observed_at) > Date.parse(intel.observed_at)) return;
+      kiState.latest = intel;
+      kiScheduleAttackEquipmentRender();
+      kiRefreshLatestArmourDetails().then((en) => { if (en) kiScheduleAttackEquipmentRender(); }).catch(() => {});
+    };
+    const takeData = (data) => {
+      if (!kiObjectRecord(data)) return;
+      const cap = kiBuildCapture(data, targetId);
+      if (cap) { showIntel(cap); return; }
+      const saved = kiLatestStoredCapture(targetId);
+      if (saved) showIntel(saved);
+      else if (featureOn('kiShowIntel')) kiFetchSharedCapture(targetId).then(showIntel).catch(() => {});
+    };
+    try {
+      KI_W.__twsFrameData = (d) => { try { takeData(d); } catch (e) { /* ignore */ } };
+      KI_W.__twsFrameIntel = (i) => { try { showIntel(i); } catch (e) { /* ignore */ } };
+      if (KI_W.__twsAtkData) takeData(KI_W.__twsAtkData);
+      if (KI_W.__twsAtkIntel) showIntel(KI_W.__twsAtkIntel);
+    } catch (e) { /* ignore */ }
+  }
+
   function initKrakenIntel() {
     const page = kiPageDetails();
     if (page.type === 'unsupported' || !page.targetId) return;
@@ -4034,6 +4142,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
       kiObserveAttackLayout();
     }
     if (page.type === 'profile' && !kiIdle) kiMountProfilePanel();
+    if (IN_POPOUT_FRAME && page.type === 'attack') kiFrameTakeData(page.targetId);
     kiStartSharedSync();
     kiRefreshLatestArmourDetails().then(() => {
       kiScheduleAttackEquipmentRender();
@@ -4116,14 +4225,143 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
     if (!ffR.error && ffR.skipped && featureOn('ffStats')) errs.push('FFScouter: add your FFScouter key in Settings to see both.');
     return { map, error: errs.length ? errs.join(' \u00b7 ') : null };
   }
-  function fetchFFStats(targetIds) {
+  function fetchFFStatsEst(targetIds) {
     const v = statsSource();
     if (v === 'both') return fetchBothStats(targetIds);
     return v === 'bsp' ? fetchBspStats(targetIds) : fetchFFScouterStats(targetIds);
   }
+  // Estimates, with TornStats spies on top where your faction has one.
+  async function fetchFFStats(targetIds) {
+    const r = await fetchFFStatsEst(targetIds);
+    try { tsApplySpies(r.map, targetIds); } catch (e) { /* ignore */ }
+    return r;
+  }
+
+  // ---------------------------------------------------------------------
+  // TORNSTATS SPIES (optional)
+  // Real battle stats from the spies your faction shares on TornStats. One
+  // call loads every spy on a faction (kept 2 hours); a single player is
+  // asked for only when needed (kept 6 hours). Spies are kept on this device
+  // only and never sent to the Kraken server.
+  // ---------------------------------------------------------------------
+  const TS_FAC_MS = 2 * 3600 * 1000;
+  const TS_USER_MS = 6 * 3600 * 1000;
+  const TS_FAIL_MS = 10 * 60 * 1000;
+  const TS_FRESH_DAYS = 60;            // newer than this replaces the estimate
+  const TS_DROP_MS = 7 * 86400 * 1000; // forget cached lookups after a week
+  let tsCache = { f: {}, u: {} };
+  let tsSavedAt = 0;
+  const tsBusy = {};
+  let tsLastError = '';
+  try {
+    const raw = JSON.parse(getCfg(STORE_KEYS.tsCache, '{}')) || {};
+    const nowMs = Date.now();
+    tsCache.f = raw.f || {};
+    tsCache.u = {};
+    Object.keys(raw.u || {}).forEach((id) => { if (raw.u[id] && nowMs - raw.u[id].t < TS_DROP_MS) tsCache.u[id] = raw.u[id]; });
+  } catch (e) { tsCache = { f: {}, u: {} }; }
+  function tsSave(force) {
+    const nowMs = Date.now();
+    if (!force && nowMs - tsSavedAt < 5000) return;
+    tsSavedAt = nowMs;
+    try { setCfg(STORE_KEYS.tsCache, JSON.stringify(tsCache)); } catch (e) { /* in-memory still works */ }
+  }
+  function tsKey() { return String(getCfg(STORE_KEYS.tsKey) || '').trim(); }
+  function tsOn() { return featureOn('tsSpies') && !!tsKey(); }
+  function tsResetFails() { tsCache.f = {}; Object.keys(tsCache.u).forEach((id) => { if (!tsCache.u[id].s) delete tsCache.u[id]; }); tsLastError = ''; tsSave(true); }
+  function tsParseSpy(o) {
+    if (!o || typeof o !== 'object' || o.status === false) return null;
+    const n = (k) => Number(String(o[k] == null ? '' : o[k]).replace(/[^0-9.]/g, '')) || 0;
+    const str = n('strength'); const def = n('defense'); const spd = n('speed'); const dex = n('dexterity');
+    const total = n('total') || (str + def + spd + dex);
+    if (total <= 0) return null;
+    let ts = Number(o.timestamp || o.update || o.updated || 0) || 0;
+    if (ts > 1e12) ts = Math.round(ts / 1000);
+    return { str, def, spd, dex, total, ts };
+  }
+  function tsMsg(d) { return String((d && (d.message || (d.error && (d.error.error || d.error)))) || 'TornStats request failed').slice(0, 120); }
+  async function tsLoadFaction(fid) {
+    fid = String(fid || '');
+    if (!tsOn() || !fid || tsBusy['f' + fid]) return;
+    const c = tsCache.f[fid];
+    if (c && Date.now() - c.t < (c.err ? TS_FAIL_MS : TS_FAC_MS)) return;
+    if (document.visibilityState !== 'visible') return;
+    tsBusy['f' + fid] = true;
+    try {
+      const d = await httpGetJson(`https://www.tornstats.com/api/v2/${encodeURIComponent(tsKey())}/spy/faction/${encodeURIComponent(fid)}`);
+      if (!d || d.status === false || !d.faction) throw new Error(tsMsg(d));
+      const nowMs = Date.now();
+      let n = 0;
+      Object.entries(d.faction.members || {}).forEach(([id, m]) => {
+        const sp = m ? (tsParseSpy(m.spy) || tsParseSpy(m.stats) || tsParseSpy(m.battlestats) || tsParseSpy(m.spy_data) || tsParseSpy(m)) : null;
+        if (sp) n++;
+        tsCache.u[String((m && m.id) || id)] = { t: nowMs, s: sp };
+      });
+      tsCache.f[fid] = { t: nowMs, n };
+      tsLastError = '';
+    } catch (e) {
+      tsCache.f[fid] = { t: Date.now(), err: (e && e.message) || 'failed' };
+      tsLastError = (e && e.message) || 'TornStats request failed';
+    } finally {
+      tsBusy['f' + fid] = false;
+      tsSave(true);
+    }
+  }
+  async function tsLoadUser(id) {
+    id = String(id || '');
+    if (!tsOn() || !id || tsBusy['u' + id]) return null;
+    const c = tsCache.u[id];
+    if (c && Date.now() - c.t < (c.s ? TS_USER_MS : TS_FAIL_MS * 3)) return c.s || null;
+    tsBusy['u' + id] = true;
+    try {
+      const d = await httpGetJson(`https://www.tornstats.com/api/v2/${encodeURIComponent(tsKey())}/spy/user/${encodeURIComponent(id)}`);
+      if (!d || d.status === false) throw new Error(tsMsg(d));
+      const raw = (d.compare && d.compare.spy) || d.spy || null;
+      const sp = tsParseSpy(raw);
+      if (sp && !sp.ts && d.compare && d.compare.timestamp) { const t2 = Date.parse(d.compare.timestamp) || Number(d.compare.timestamp) * 1000; if (t2) sp.ts = Math.round(t2 / 1000); }
+      tsCache.u[id] = { t: Date.now(), s: sp };
+      tsLastError = '';
+      return sp;
+    } catch (e) {
+      tsCache.u[id] = { t: Date.now(), s: null };
+      tsLastError = (e && e.message) || 'TornStats request failed';
+      return null;
+    } finally {
+      tsBusy['u' + id] = false;
+      tsSave();
+    }
+  }
+  function tsSpyFor(id) { const c = tsCache.u[String(id)]; return (c && c.s) || null; }
+  function tsAgeDays(sp) { return sp && sp.ts ? Math.max(0, Math.floor((Date.now() / 1000 - sp.ts) / 86400)) : null; }
+  function tsAgeText(sp) { const d = tsAgeDays(sp); return d === null ? 'age unknown' : d === 0 ? 'today' : `${d}d ago`; }
+  function tsFresh(sp) { const d = tsAgeDays(sp); return !!sp && (d === null || d <= TS_FRESH_DAYS); }
+  function tsSplitText(sp) { return `Str ${fmtBsHuman(sp.str)} · Def ${fmtBsHuman(sp.def)} · Spd ${fmtBsHuman(sp.spd)} · Dex ${fmtBsHuman(sp.dex)}`; }
+  function tsApplySpies(map, ids) {
+    if (!tsOn() || !map) return;
+    (ids || []).forEach((id) => {
+      const sp = tsSpyFor(id);
+      if (!tsFresh(sp)) return;
+      const base = map[id] || { player_id: Number(id) };
+      const e = Object.assign({}, base, { spy: sp, bs_estimate: sp.total, bs_estimate_human: fmtBsHuman(sp.total), source: 'ts-spy', both: false });
+      if (typeof base.fair_fight === 'number') e.ffFallback = base.fair_fight;
+      delete e.fair_fight; // worked out from the spy and your own stats
+      map[id] = e;
+    });
+  }
+  // One line for the Intel panel / ENEMY tab.
+  function tsSpyHtml(id, rerender) {
+    if (!tsOn() || !id) return '';
+    const sp = tsSpyFor(id);
+    const c = tsCache.u[String(id)];
+    if (!c && rerender) tsLoadUser(id).then((x) => { if (x) { try { rerender(); } catch (e) { /* ignore */ } } }).catch(() => {});
+    if (!sp) return '';
+    const old = !tsFresh(sp);
+    return `<div class="tws-ts-spy${old ? ' tws-ts-old' : ''}">🕵 Spy <b>${fmtBsHuman(sp.total)}</b> · ${tsSplitText(sp)} <span class="tws-ts-age">(${tsAgeText(sp)}${old ? ', old' : ''})</span></div>`;
+  }
   // Text of a player's estimate(s) for the roster ("F 107k · B 112k" in Both mode).
   function estText(e) {
     if (!e) return '';
+    if (e.spy) return `${e.bs_estimate_human} (spied ${tsAgeText(e.spy)})`;
     if (e.both) return `F ${e.ffHuman || '\u2013'} \u00b7 B ${e.bspHuman || '\u2013'}`;
     return e.bs_estimate_human || '?';
   }
@@ -4159,6 +4397,12 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
   }
   function fairFightOf(e) {
     if (!e) return null;
+    // A TornStats spy: FF from the real stats and yours (FFScouter's FF until yours are known).
+    if (e.spy && e.spy.total > 0) {
+      if (ownBs) return 1 + (8 / 3) * (e.spy.total / ownBs);
+      wantOwnBattleStats();
+      return typeof e.ffFallback === 'number' && e.ffFallback > 0 ? e.ffFallback : null;
+    }
     if (typeof e.fair_fight === 'number' && e.fair_fight > 0) return e.fair_fight;
     if (typeof e.bs_estimate === 'number' && e.bs_estimate > 0) {
       if (!ownBs) { wantOwnBattleStats(); return null; }
@@ -4209,6 +4453,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
 
   function estHtml(e) {
     if (!e) return '';
+    if (e.spy) return `<span class="tws-est-spy" title="TornStats spy, ${tsAgeText(e.spy)}: ${tsSplitText(e.spy)}">\ud83d\udd75${e.bs_estimate_human}</span>`;
     if (e.both) {
       const tag = (t) => `<span style="color:#8a8a8a;font-size:0.85em;">${t}</span>`;
       return `${tag('F')} ${e.ffHuman || '\u2013'} ${tag('B')} <span class="tws-est-bsp">${e.bspHuman || '\u2013'}</span>`;
@@ -6532,6 +6777,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
         </span>
       </div>
       <div id="tws-po-life" style="display:none;"><span class="tws-po-life-txt">\u2764 \u2013</span><span class="tws-po-life-bar"><span class="tws-po-life-fill"></span></span></div>
+      <div id="tws-po-stats" style="display:none;"></div>
       <div id="tws-temp-quick" style="display:none;"></div>
       <div id="tws-po-msg" style="display:none;"></div>
       <iframe id="tws-po-frame"></iframe>
@@ -6937,13 +7183,14 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
     let covered = 0;
     members.forEach((m) => {
       const a = activity[String(m.id)];
-      if (!a || !Array.isArray(a.p)) return;
-      if (a.p.filter((x) => x >= 0).length < 18) return; // not enough hours known yet
+      const p = a && a.p;
+      if (!Array.isArray(p)) return;
+      if (p.filter((x) => x >= 0).length < 18) return; // not enough hours known yet
       covered++;
-      a.p.forEach((x, h) => { exp[h] += Math.max(0, x); });
+      p.forEach((x, h) => { exp[h] += Math.max(0, x); });
     });
     if (covered < Math.max(3, Math.ceil(members.length * 0.5))) {
-      return '<div style="color:#888;font-size:11px;margin:4px 0 6px;text-align:center;">\ud83d\udcca Activity history is still learning this faction\u2019s hours\u2026</div>';
+      return '<div style="color:#888;font-size:11px;margin:4px 0 6px;text-align:center;">\ud83d\udcca Activity history is still learning this faction\u2019s hours (readings since the match was drawn)\u2026</div>';
     }
     const scale = members.length / covered;
     let best = 0;
@@ -6954,7 +7201,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
     }
     const nowH = new Date().getUTCHours();
     const pad = (h) => String(h % 24).padStart(2, '0');
-    return `<div style="color:#bbb;font-size:11px;margin:4px 0 6px;text-align:center;">\ud83d\udcca Usually online now: <b>~${Math.round(exp[nowH] * scale)}</b> of ${members.length} \u00b7 Quietest: <b>${pad(best)}:00\u2013${pad(best + 3)}:00 TCT</b> (~${Math.round((bestSum / 3) * scale)} on)</div>`;
+    return `<div style="color:#bbb;font-size:11px;margin:4px 0 6px;text-align:center;">\ud83d\udcca Usually online now: <b>~${Math.round(exp[nowH] * scale)}</b> of ${members.length} \u00b7 Quietest: <b>${pad(best)}:00\u2013${pad(best + 3)}:00 TCT</b> (~${Math.round((bestSum / 3) * scale)} on)<div style="color:#888;font-size:10px;margin-top:1px;">From readings taken since the match was drawn</div></div>`;
   }
 
   // ---------------------------------------------------------------------
@@ -7938,6 +8185,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
         // FFScouter estimated battle stats -- optional, and cached (see
         // fetchFFStats), so they're merged in from the cache every cycle
         // even when no request was needed or a request failed.
+        if (tsOn()) await tsLoadFaction(enemyFactionId).catch(() => {});
         const ffResult = await fetchFFStats(enemyMembers.map((m) => m.id));
         ffError = ffResult.error;
         if (Object.keys(ffResult.map).length) {
@@ -8444,6 +8692,17 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
     #tws-panel.tws-mini.tws-mini-dock #tws-header { padding: 0; }
     #tws-panel.tws-mini.tws-mini-dock #tws-logo { width: var(--tws-dock-size, 34px); height: var(--tws-dock-size, 34px); box-shadow: 0 0 5px rgba(110,190,220,0.5); }
 
+    /* Header fit: the buttons never shrink; the title becomes the octopus and
+       the enemy name hides (never cut short) when there isn't room. */
+    #tws-header #tws-hbtns { flex-shrink: 0; white-space: nowrap; }
+    #tws-title .tws-title-short { display: none; }
+    #tws-header.tws-hfit #tws-title, #tws-header.tws-hfit .tws-enemy-name { flex-shrink: 0; }
+    #tws-header.tws-hfit .tws-enemy-name { max-width: none; text-overflow: clip; }
+    #tws-header.tws-hfit #tws-hflash { flex-shrink: 1; min-width: 0; }
+    #tws-header.tws-h-short #tws-title .tws-title-txt { display: none; }
+    #tws-header.tws-h-short #tws-title .tws-title-short { display: inline; font-size: 18px; vertical-align: middle; }
+    #tws-header.tws-h-noenemy .tws-enemy-name { display: none !important; }
+    #tws-header.tws-h-noclock #tws-clock { display: none !important; }
     .tws-enemy-name {
       color: #999;
       font-size: 10px;
@@ -9017,6 +9276,13 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
     #tws-temp-quick .tws-tq-btn small { display: block; font-weight: normal; font-size: 10px; color: #b5d8b5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     #tws-temp-quick .tws-tq-btn.tws-tq-none { background: #2a2a2a; border-color: #444; color: #888; }
     #tws-temp-quick .tws-tq-btn.tws-tq-none small { color: #777; }
+    #tws-po-stats { padding: 3px 10px 4px; background: #1a1a1a; border-bottom: 1px solid #333; font: 12px Arial, sans-serif; color: #ccc; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    #tws-po-stats b { color: #fff; }
+    .tws-ts-spy { margin: 4px 0 6px; padding: 4px 8px; border-radius: 6px; background: #1d2a1f; border: 1px solid #2f5a35; color: #cfe8cf; font: 12px Arial, sans-serif; }
+    .tws-ts-spy b { color: #fff; }
+    .tws-ts-spy .tws-ts-age { color: #9ab79a; }
+    .tws-ts-spy.tws-ts-old { background: #2a2620; border-color: #5a4a2f; color: #e0cfa8; }
+    #tws-po-stats .tws-po-bspwhy { color: #e0a030; }
     #tws-po-life { display: flex; align-items: center; gap: 8px; padding: 3px 10px 5px; background: #1a1a1a; border-bottom: 1px solid #333; font: bold 12px Arial, sans-serif; color: #ddd; }
     #tws-po-life .tws-po-life-txt { white-space: nowrap; }
     #tws-po-life .tws-po-life-bar { flex: 1; height: 7px; background: #333; border-radius: 4px; overflow: hidden; }
@@ -9405,6 +9671,8 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
     if (ff !== null) setCfg(STORE_KEYS.ffscouterKey, ff);
     const bsp = val('#tws-in-bsp');
     if (bsp !== null) setCfg(STORE_KEYS.bspKey, bsp);
+    const ts = val('#tws-in-ts');
+    if (ts !== null) setCfg(STORE_KEYS.tsKey, ts);
     const srcSel = body.querySelector('#tws-in-statsrc');
     if (srcSel) setCfg(STORE_KEYS.statsSource, (srcSel.value === 'bsp' || srcSel.value === 'both') ? srcSel.value : 'ff');
     const bloodSel = body.querySelector('#tws-in-blood');
@@ -9848,8 +10116,8 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
     panel.innerHTML = `
       <div id="tws-header">
         <img id="tws-logo" src="${LOGO_DATA_URI}" alt="🐙" draggable="false">
-        <b id="tws-title">Krakens War Room 🐙<span id="tws-clock" class="tws-clock" title="Torn City Time (TCT)"></span></b><span id="tws-enemy-name" class="tws-enemy-name"></span>
-        <span>
+        <b id="tws-title"><span class="tws-title-txt">Krakens War Room 🐙</span><span class="tws-title-short">\ud83d\udc19</span><span id="tws-clock" class="tws-clock" title="Torn City Time (TCT)"></span></b><span id="tws-enemy-name" class="tws-enemy-name"></span>
+        <span id="tws-hbtns">
           <span class="tws-energy" id="tws-energy" title="Energy"><span class="tws-energy-top"><svg class="tws-energy-bolt" viewBox="0 0 24 24" width="12" height="12" aria-hidden="true"><path fill="#6aa22a" d="M13.5 1 4 13.5h6.2L8.8 23 20 9.6h-6.4z"/></svg><span class="tws-energy-txt">–</span></span><span class="tws-energy-track"><span class="tws-energy-fill"></span></span></span>
           <span class="tws-energy tws-drug" id="tws-drug" title="Drug cooldown"><span class="tws-energy-top">${DRUG_SVG}<span class="tws-energy-txt">–</span></span><span class="tws-energy-track"><span class="tws-energy-fill"></span></span></span>
           <a class="tws-rev-btn" id="tws-rev-btn" target="_blank" href="#" title="Quick revive">Rev</a>
@@ -10592,6 +10860,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
         ? `vs ${enemyFactionName || 'detecting...'}`
         : '';
     }
+    try { fitHeader(); } catch (e) { /* ignore */ }
 
     if (collapsed || showSettings) closeTravelPopup();
     if (collapsed) {
@@ -10625,6 +10894,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
           ${settingsTabsBar()}
           ${creditCardHtml()}
           ${keyFieldHtml}
+          ${referralHtml()}
           <label>Estimated battle stats from</label>
           <select id="tws-in-statsrc">
             <option value="ff" ${statsSource() === 'ff' ? 'selected' : ''}>FFScouter (free)</option>
@@ -10635,6 +10905,9 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
           <input id="tws-in-ff" type="text" value="${getCfg(STORE_KEYS.ffscouterKey)}" placeholder="16-char key from ffscouter.com">
           <label>BSP key (the Torn API key you registered with BSP)</label>
           <input id="tws-in-bsp" type="text" value="${getCfg(STORE_KEYS.bspKey)}" placeholder="${bspInstalledKey() ? 'Using the key from BSP on this device' : '16-char Torn key registered with BSP'}">
+          <label>TornStats key (optional \u2013 your faction\u2019s spies)</label>
+          <input id="tws-in-ts" type="text" value="${getCfg(STORE_KEYS.tsKey)}" placeholder="Your TornStats API key (tornstats.com \u2192 Settings)">
+          <div style="color:#888;font-size:11px;margin:2px 0 8px;">Real stats from spies your faction shares on TornStats replace the estimates (\ud83d\udd75). Sent only to TornStats; the spies stay on this device.</div>
           <div style="color:#888;font-size:11px;margin:2px 0 8px;">Only used when BSP is picked above. If BSP is installed on this device, its saved predictions are used first (no requests), and its key is picked up automatically. The key is sent only to the BSP server, as BSP itself does.</div>
           <label>Medical item for the header 🩸 button</label>
           <select id="tws-in-med">
@@ -10732,10 +11005,11 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
         showToast(`Estimated battle stats: ${statsSource() === 'both' ? 'FFScouter + BSP' : statsSourceName()}`);
         refreshRosters();
       });
-      [['#tws-in-ff', STORE_KEYS.ffscouterKey], ['#tws-in-bsp', STORE_KEYS.bspKey]].forEach(([sel, k]) => {
+      [['#tws-in-ff', STORE_KEYS.ffscouterKey], ['#tws-in-bsp', STORE_KEYS.bspKey], ['#tws-in-ts', STORE_KEYS.tsKey]].forEach(([sel, k]) => {
         const el = body.querySelector(sel);
-        if (el) el.addEventListener('change', () => { setCfg(k, el.value.trim()); refreshRosters(); });
+        if (el) el.addEventListener('change', () => { setCfg(k, el.value.trim()); if (k === STORE_KEYS.tsKey) tsResetFails(); refreshRosters(); });
       });
+      try { wireReferral(body); } catch (e) { /* ignore */ }
       body.querySelector('#tws-save-btn').addEventListener('click', () => {
         saveGeneralFields(body);
         showSettings = false;
@@ -11500,12 +11774,79 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
           prot: Array.isArray(d.protected) ? d.protected.map(String) : (cached && cached.prot) || [],
           warLock: d.warLock || null,
           via: d.via || '',
+          ref: d.ref || null,
         };
         setCfg(ACCESS_CACHE_KEY, JSON.stringify(s));
+        try { announceReferralReward(s.ref); } catch (e) { /* ignore */ }
         return (accessState = s);
       }
     } catch (e) { /* server unreachable -- keep the last answer */ }
     return (accessState = (cached && cached.id === id) ? cached : null);
+  }
+
+  // ---- Referrals ----
+  // A new player can say who referred them (their Torn ID) before their first
+  // payment; when they first pay, the referrer gets 7 free days (until War
+  // Room has 1,000 paying customers). Handled on the Kraken server.
+  const REFERRAL_URL = 'https://dashing-fish-54.eu-west-1.convex.site/referral';
+  const REF_SEEN_KEY = 'tws_ref_seen';
+  function announceReferralReward(ref) {
+    if (!ref || !ref.noticeAt || !ref.notice) return;
+    const seen = Number(getCfg(REF_SEEN_KEY, 0)) || 0;
+    if (ref.noticeAt <= seen) return;
+    setCfg(REF_SEEN_KEY, ref.noticeAt);
+    if (!seen && Date.now() - ref.noticeAt > 7 * 86400000) return; // old news on a fresh install
+    showToast(`\ud83c\udf81 ${ref.notice}`);
+  }
+  function referralHtml() {
+    if (!featureOn('referrals')) return '';
+    const s = accessState;
+    const r = s && s.ref;
+    if (!r) return '';
+    const myId = escHtml((s && s.id) || '');
+    let top = '';
+    if (r.by) {
+      top = `<div>Referred by <b>${escHtml(r.byName || 'Player')} [${escHtml(String(r.by))}]</b></div>`;
+    } else if (r.canSet) {
+      top = `<div style="margin-bottom:4px;">Did someone send you to War Room? Enter their Torn ID (the number in [ ]) before your first payment:</div>
+        <div style="display:flex;gap:6px;"><input id="tws-in-ref" type="text" inputmode="numeric" placeholder="Their Torn ID" style="flex:1;min-width:0;"><button id="tws-ref-save" type="button" style="background:#2c2140;color:#fff;border:1px solid #6b3fa0;border-radius:6px;padding:4px 10px;">Save</button></div>`;
+    }
+    const own = r.open
+      ? `<div style="margin-top:6px;">Your referral ID: <b>${myId}</b> <span id="tws-ref-copy" style="cursor:pointer;color:#c9a4ff;">(copy)</span><br><span style="color:#aaa;">When someone you refer makes their first payment, you get <b>7 free days</b>.</span></div>`
+      : `<div style="margin-top:6px;color:#aaa;">Referral rewards have ended.</div>`;
+    const earned = r.earned ? `<div style="margin-top:4px;color:#7cfc7c;">Earned so far: <b>${r.earned}</b> free week${r.earned === 1 ? '' : 's'}</div>` : '';
+    return `<div class="tws-ref-box" style="border:1px solid #4a3a66;background:#1f1830;border-radius:8px;padding:8px 10px;margin:8px 0;font-size:12px;line-height:1.4;">
+      <div style="font-weight:bold;margin-bottom:4px;">\ud83c\udf81 Referrals</div>${top}${own}${earned}</div>`;
+  }
+  function wireReferral(body) {
+    const btn = body.querySelector('#tws-ref-save');
+    if (btn) btn.addEventListener('click', async () => {
+      const inp = body.querySelector('#tws-in-ref');
+      const ref = String((inp && inp.value) || '').replace(/[^0-9]/g, '');
+      if (!ref) { showToast('Enter the referrer\u2019s Torn ID (numbers only).'); return; }
+      const me = (accessState && accessState.id) || await accessMyId().catch(() => '');
+      if (!me) { showToast('Add your API key first.'); return; }
+      btn.disabled = true;
+      try {
+        const d = await serverGet(`${REFERRAL_URL}?me=${encodeURIComponent(me)}&ref=${encodeURIComponent(ref)}`);
+        if (d && d.ok) {
+          showToast(`\ud83c\udf81 Saved \u2013 referred by ${d.refName || `player ${ref}`}. Thanks!`);
+          await refreshAccess(true);
+          render();
+        } else {
+          showToast((d && d.error) || 'Couldn\u2019t save that \u2013 try again in a moment.');
+          btn.disabled = false;
+        }
+      } catch (e) {
+        showToast('Couldn\u2019t reach the War Room server \u2013 try again in a moment.');
+        btn.disabled = false;
+      }
+    });
+    const cp = body.querySelector('#tws-ref-copy');
+    if (cp) cp.addEventListener('click', async () => {
+      const ok = await copyToClipboard(String((accessState && accessState.id) || ''));
+      showToast(ok ? 'Referral ID copied' : 'Couldn\u2019t copy \u2013 it\u2019s your Torn ID');
+    });
   }
 
   // Protected factions (set by the owner): War Room is never used against them.
@@ -11546,6 +11887,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
     let html = '';
     if (s && s.status === 'trial' && s.until) {
       html = `\u23f3 Free trial: <b>${fmtAccessLeft(s.until - Date.now())}</b> left. 1 Xanax to ${accessProfileLink()} = 7 days.`;
+      if (featureOn('referrals') && s.ref && s.ref.canSet) html += ' <span style="color:#aaa;">\ud83c\udf81 Referred by someone? Add their ID in \u2699 Settings.</span>';
     } else if (s && s.status === 'paid' && s.until && s.until - Date.now() < 24 * 3600 * 1000) {
       html = `\u23f3 Access ends in <b>${fmtAccessLeft(s.until - Date.now())}</b>. Send Xanax to ${accessProfileLink()} to extend.`;
     }
@@ -11877,6 +12219,13 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
       if (e) { e.preventDefault(); e.stopImmediatePropagation(); }
       // In the pop-out: get the enemy loadout ready for the fight first.
       try { if (win !== window && win.frameElement) kiArmPopoutFrame(win.frameElement, attackUrl(id)); } catch (e2) { /* ignore */ }
+      // A pop-out's own copy: ask the main page to get the loadout ready.
+      try {
+        if (win === window && IN_POPOUT_FRAME && window.frameElement) {
+          const tw = KI_W.top;
+          if (tw && typeof tw.__twsArmPopout === 'function') tw.__twsArmPopout(window.frameElement, attackUrl(id));
+        }
+      } catch (e2) { /* ignore */ }
       win.location.href = attackUrl(id); // same window: the pop-out stays the pop-out
     };
     if (!doc.getElementById('tws-profile-atk-css')) {
@@ -11923,16 +12272,199 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
     }, 700);
   }
 
+  // ---- Header fit ----
+  const hdrFit = { sig: '' };
+  function fitHeader(force) {
+    if (!panel) return;
+    const h = panel.querySelector('#tws-header');
+    if (!h) return;
+    const on = featureOn('fitHeader');
+    h.classList.toggle('tws-hfit', on);
+    if (!on) { h.classList.remove('tws-h-short', 'tws-h-noenemy', 'tws-h-noclock'); hdrFit.sig = ''; return; }
+    if (panel.classList.contains('tws-mini') || !h.clientWidth) return;
+    const en = h.querySelector('#tws-enemy-name');
+    const pill = h.querySelector('#tws-hflash');
+    const sig = [h.clientWidth, en ? en.textContent : '', pill ? `${pill.style.display}|${pill.textContent.length}` : '', panel.className].join('~');
+    if (!force && sig === hdrFit.sig) return;
+    hdrFit.sig = sig;
+    h.classList.remove('tws-h-short', 'tws-h-noenemy', 'tws-h-noclock');
+    const over = () => h.scrollWidth > h.clientWidth + 1;
+    if (!over()) return;
+    h.classList.add('tws-h-short');
+    if (!over()) return;
+    h.classList.add('tws-h-noenemy');
+    if (!over()) return;
+    h.classList.add('tws-h-noclock');
+  }
+  function watchHeaderFit() {
+    if (IN_POPOUT_FRAME || window.top !== window.self) return;
+    try {
+      const RO = window.ResizeObserver;
+      const h = panel && panel.querySelector('#tws-header');
+      if (RO && h) new RO(() => { try { fitHeader(); } catch (e) { /* ignore */ } }).observe(h);
+    } catch (e) { /* ignore */ }
+    __nativeSetInterval(() => { try { fitHeader(); } catch (e) { /* ignore */ } }, 1000);
+  }
+
+  // ---- Pop-out fit to screen ----
+  // Keeps the pop-out inside the screen, and when the page inside is wider
+  // than the pop-out (Torn's attack page on narrow phones) lays it out at the
+  // width it needs and scales it down to fit, so nothing is cut off.
+  function clearFrameFit(f) {
+    if (!f || !f.__fitS) return;
+    f.__fitS = 0;
+    ['flex', 'width', 'height', 'transform', 'transformOrigin', 'maxWidth'].forEach((k) => { f.style[k] = ''; });
+  }
+  function fitPopoutToScreen() {
+    if (!popout || popout.root.style.display !== 'flex') return;
+    const root = popout.root;
+    const frames = [popout.mainFrame].concat(Object.values(popout.preFrames || {}));
+    if (!featureOn('popoutFit')) { frames.forEach(clearFrameFit); return; }
+    // 1) the window itself stays on screen
+    const vv = window.visualViewport;
+    const vw = Math.floor(vv ? vv.width : window.innerWidth);
+    const r = root.getBoundingClientRect();
+    if (vw > 0 && (r.left < 0 || r.right > vw + 1)) {
+      const left = Math.max(0, Math.min(r.left, vw - 120));
+      root.style.left = `${Math.round(left)}px`;
+      root.style.width = `${Math.max(120, Math.floor(vw - left - 2))}px`;
+    }
+    frames.forEach((f) => { if (f && f !== popout.frame) clearFrameFit(f); });
+    const f = popout.frame;
+    if (!f || root.classList.contains('tws-po-min') || f.style.display === 'none') return;
+    if (!pageFocused()) return;
+    let d;
+    try { d = f.contentDocument; } catch (e) { return; }
+    if (!d || !d.documentElement || !d.body) return;
+    if (f.__fitDoc !== d) { f.__fitDoc = d; f.__fitNeed = 0; clearFrameFit(f); return; }
+    // 2) the page inside fits the pop-out's width
+    const W = root.clientWidth;
+    if (W < 100) return;
+    let other = 0;
+    Array.from(root.children).forEach((c) => {
+      if (c.tagName === 'IFRAME' || c.classList.contains('tws-po-rs')) return;
+      other += c.offsetHeight || 0;
+    });
+    const H = Math.max(100, root.clientHeight - other);
+    const V = f.__fitS ? (parseFloat(f.style.width) || W) : W;
+    const M = Math.max(d.documentElement.scrollWidth || 0, d.body.scrollWidth || 0);
+    if (M > V + 2) f.__fitNeed = Math.max(f.__fitNeed || 0, Math.min(M, Math.round(W / 0.55)));
+    const need = Math.max(W, f.__fitNeed || 0);
+    const sc = W / need;
+    if (sc > 0.995) { clearFrameFit(f); return; }
+    const key = `${need}x${Math.round(H / sc)}`;
+    if (f.__fitS && f.__fitKey === key) return;
+    f.__fitS = sc;
+    f.__fitKey = key;
+    Object.assign(f.style, { flex: 'none', maxWidth: 'none', width: `${need}px`, height: `${Math.round(H / sc)}px`, transform: `scale(${sc.toFixed(4)})`, transformOrigin: '0 0' });
+  }
+  function watchPopoutFit() {
+    if (IN_POPOUT_FRAME || window.top !== window.self) return;
+    __nativeSetInterval(() => { try { fitPopoutToScreen(); } catch (e) { /* ignore */ } }, 400);
+  }
+
+  // ---- Kraken Intel inside pop-out pages ----
+  // Tampermonkey runs its own copy in the pop-out page. Torn PDA doesn't run
+  // scripts in frames, so War Room starts the copy from here: the same code,
+  // pointed at the pop-out's page, stopping when that page goes away.
+  function bootPopoutIntel() {
+    if (IN_POPOUT_FRAME || window.top !== window.self) return;
+    try { KI_W.__twsArmPopout = (frame, url) => { try { kiArmPopoutFrame(frame, url); } catch (e) { /* ignore */ } }; } catch (e) { /* ignore */ }
+    __nativeSetInterval(() => {
+      if (!popout || popout.root.style.display !== 'flex') return;
+      if (!featureOn('popoutIntel')) return;
+      popout.root.querySelectorAll('iframe').forEach((f) => {
+        let w; let d; let href = '';
+        try { w = f.contentWindow; d = f.contentDocument; href = String(w.location.href); } catch (e) { return; }
+        if (!w || !d || f.__twsBootDoc === d) return;
+        if (!/^https:\/\/www\.torn\.com\//.test(href)) return;
+        if (d.readyState === 'loading') return;
+        if (!/[?&]sid=attack\b/i.test(href) && !/\/profiles\.php/i.test(href)) { f.__twsBootDoc = d; return; }
+        if (w.__twsFrameKI) { f.__twsBootDoc = d; return; }
+        if (!IS_PDA) {
+          // Give Tampermonkey's own copy a moment first.
+          if (f.__twsWaitDoc !== d) { f.__twsWaitDoc = d; f.__twsWaitAt = Date.now(); return; }
+          if (d.readyState !== 'complete' || Date.now() - f.__twsWaitAt < 1500) return;
+        }
+        f.__twsBootDoc = d;
+        try { __twsMain({ win: w, doc: d, frame: f }); } catch (e) { console.warn('[War Room] pop-out Intel failed', e); }
+      });
+    }, 120);
+  }
+
+  // ---- Estimated stats in the pop-out bar ----
+  function popoutTargetId() {
+    try {
+      const href = String(popout.frame.contentWindow.location.href);
+      let m = href.match(/[?&]sid=attack\b.*?[?&]user2ID=(\d+)/i) || href.match(/sid=attack.*user2ID=(\d+)/i);
+      if (m) return Number(m[1]);
+      m = /\/profiles\.php/i.test(href) && href.match(/[?&]XID=(\d+)/i);
+      if (m) return Number(m[1]);
+    } catch (e) { /* not readable */ }
+    return 0;
+  }
+  const poStats = { id: 0, html: '', busy: false, at: 0 };
+  function poStatsHtml(ffE, bspE, bspWhy, spy) {
+    const parts = [];
+    const useSpy = spy && tsFresh(spy);
+    const ff = fairFightOf(useSpy ? { spy, ffFallback: ffE && ffE.fair_fight } : (ffE || bspE));
+    if (typeof ff === 'number' && isFinite(ff)) {
+      const c = ffColour(ff);
+      parts.push(`<b style="${c ? `color:${c};` : ''}">FF ${ff.toFixed(2)}</b>`);
+    }
+    if (spy) parts.push(`<span title="${kiEsc(tsSplitText(spy))}">\ud83d\udd75 Spy <b>${fmtBsHuman(spy.total)}</b> (${tsAgeText(spy)})</span>`);
+    if (ffE && ffE.bs_estimate_human) parts.push(`FFScouter <b>${kiEsc(ffE.bs_estimate_human)}</b>`);
+    if (bspE && bspE.bs_estimate_human) parts.push(`BSP <b>${kiEsc(bspE.bs_estimate_human)}</b>${bspE.source === 'bsp-spy' ? ' (spy)' : ''}`);
+    else if (bspWhy) parts.push(`<span class="tws-po-bspwhy" title="${kiEsc(bspWhy)}">BSP: ${kiEsc(bspWhy)}</span>`);
+    return parts.length ? `📊 ${parts.join(' · ')}` : '';
+  }
+  function updatePopoutStats() {
+    if (!popout) return;
+    const el = popout.root.querySelector('#tws-po-stats');
+    if (!el) return;
+    const on = featureOn('popoutStats') && featureOn('ffStats') && popout.root.style.display === 'flex';
+    const id = on ? popoutTargetId() : 0;
+    if (!id) { el.style.display = 'none'; poStats.id = 0; return; }
+    if (id !== poStats.id) { poStats.id = id; poStats.html = ''; poStats.at = 0; el.innerHTML = '📊 Estimating…'; }
+    el.style.display = 'block';
+    if (poStats.busy || (poStats.at && Date.now() - poStats.at < 60000)) return;
+    poStats.busy = true;
+    poStats.at = Date.now();
+    Promise.all([fetchFFScouterStats([id]).catch(() => ({ map: {} })), fetchBspStats([id]).catch(() => ({ map: {} })), tsOn() ? tsLoadUser(id).catch(() => null) : Promise.resolve(null)])
+      .then(([ffR, bspR, spy]) => {
+        if (poStats.id !== id) return;
+        // Say why BSP is missing (this browser has no BSP key / BSP had no
+        // prediction / an error), rather than leaving it out silently.
+        let bspWhy = '';
+        if (!bspR.map[id]) {
+          if (!bspKey()) bspWhy = 'no key on this browser \u2013 add it in \u2699 Settings';
+          else if (bspR.error) bspWhy = String(bspR.error).slice(0, 80);
+          else bspWhy = 'no prediction for this player';
+        }
+        poStats.html = poStatsHtml(ffR.map[id], bspR.map[id], bspWhy, spy || tsSpyFor(id));
+        el.innerHTML = poStats.html || '📊 No estimate for this player (add an FFScouter or BSP key in Settings).';
+      })
+      .finally(() => { poStats.busy = false; });
+  }
+  function watchPopoutStats() {
+    if (IN_POPOUT_FRAME || window.top !== window.self) return;
+    __nativeSetInterval(() => { try { updatePopoutStats(); } catch (e) { /* ignore */ } }, 700);
+  }
+
   function startScriptInner() {
     seedKrakenIntelConsent();
     initKrakenIntel(); // independent of the main panel's page gating below
     kiWatchPopoutFights(); // PC Mode: fights opened in a War Room pop-out, from any page
     installProfileAttack(); // profile Attack button always works (page + pop-out)
+    bootPopoutIntel(); // Intel inside pop-out pages (Torn PDA: scripts don't run there)
+    watchPopoutFit(); // pop-outs fit the screen width
+    watchPopoutStats(); // FFScouter / BSP estimate in the pop-out bar
 
     // "Run on every Torn page" off -> behave as before: only on faction pages.
     if (!featureOn('everyPage') && !onFactionPage()) return;
 
     buildPanelSkeleton();
+    watchHeaderFit();
 
     if (!getApiKey()) {
       showSettings = true;
@@ -11989,7 +12521,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
 
   const safeInit = IN_POPOUT_FRAME
     ? () => {
-      if (!pcMode()) return; // pop-out Intel is a PC Mode feature
+      if (!featureOn('popoutIntel')) return;
       try { seedKrakenIntelConsent(); initKrakenIntel(); installProfileAttack(); } catch (e) { console.warn('[War Room pop-out] Intel failed', e); }
     }
     : () => { Promise.resolve().then(init).catch((e) => reportCrash('init', e)); };
