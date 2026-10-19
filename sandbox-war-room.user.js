@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Sandbox War Room 🧪
 // @namespace    jay-torn-war-script-sandbox
-// @version      1.99.29
+// @version      1.99.30
 // @downloadURL  https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @updateURL    https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @description  [SANDBOX - test build, not for general use] Enemy hospital timers, quick attack links, and a chain timeout alert overlay for Torn faction war pages. Works in Tampermonkey (Firefox) and Torn PDA.
@@ -582,7 +582,7 @@ const __twsOuter = (() => {
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.29';
+  const SCRIPT_VERSION = '1.99.30';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -714,6 +714,7 @@ const __twsOuter = (() => {
   // wording are edited in Advanced -> 💰 Bounty amounts.)
   const FEATURES = [
     // --- Panel & pages ---
+    { key: 'referrals', group: 'Panel & pages', label: '\ud83c\udf81 Referrals box in Settings (and the reminder during your trial)', hint: 'Enter who referred you, and see your own referral ID and the free weeks you\u2019ve earned.' },
     { key: 'everyPage', group: 'Panel & pages', label: 'Run on every Torn page (off = faction pages only)', hint: 'Keeps the timers, chain alerts, 🩸 and chat working wherever you are in Torn. Takes effect the next time a page loads.' },
     { key: 'fixedTop', group: 'Panel & pages', label: 'Keep chain timers and tabs fixed at the top of the panel', hint: 'Off = they scroll away with the member list, like older versions.' },
     { key: 'perfMonitor', group: '\ud83d\udda5\ufe0f PC Mode', label: '\ud83d\udcc8 Performance monitor badge', hint: 'PC Mode only. Small badge bottom-left showing how much time War Room uses and how long the browser freezes; tap it for a report you can copy.' },
@@ -10893,6 +10894,7 @@ const __twsOuter = (() => {
           ${settingsTabsBar()}
           ${creditCardHtml()}
           ${keyFieldHtml}
+          ${referralHtml()}
           <label>Estimated battle stats from</label>
           <select id="tws-in-statsrc">
             <option value="ff" ${statsSource() === 'ff' ? 'selected' : ''}>FFScouter (free)</option>
@@ -11007,6 +11009,7 @@ const __twsOuter = (() => {
         const el = body.querySelector(sel);
         if (el) el.addEventListener('change', () => { setCfg(k, el.value.trim()); if (k === STORE_KEYS.tsKey) tsResetFails(); refreshRosters(); });
       });
+      try { wireReferral(body); } catch (e) { /* ignore */ }
       body.querySelector('#tws-save-btn').addEventListener('click', () => {
         saveGeneralFields(body);
         showSettings = false;
@@ -11771,12 +11774,79 @@ const __twsOuter = (() => {
           prot: Array.isArray(d.protected) ? d.protected.map(String) : (cached && cached.prot) || [],
           warLock: d.warLock || null,
           via: d.via || '',
+          ref: d.ref || null,
         };
         setCfg(ACCESS_CACHE_KEY, JSON.stringify(s));
+        try { announceReferralReward(s.ref); } catch (e) { /* ignore */ }
         return (accessState = s);
       }
     } catch (e) { /* server unreachable -- keep the last answer */ }
     return (accessState = (cached && cached.id === id) ? cached : null);
+  }
+
+  // ---- Referrals ----
+  // A new player can say who referred them (their Torn ID) before their first
+  // payment; when they first pay, the referrer gets 7 free days (until War
+  // Room has 1,000 paying customers). Handled on the Kraken server.
+  const REFERRAL_URL = 'https://dashing-fish-54.eu-west-1.convex.site/referral';
+  const REF_SEEN_KEY = 'tws_ref_seen';
+  function announceReferralReward(ref) {
+    if (!ref || !ref.noticeAt || !ref.notice) return;
+    const seen = Number(getCfg(REF_SEEN_KEY, 0)) || 0;
+    if (ref.noticeAt <= seen) return;
+    setCfg(REF_SEEN_KEY, ref.noticeAt);
+    if (!seen && Date.now() - ref.noticeAt > 7 * 86400000) return; // old news on a fresh install
+    showToast(`\ud83c\udf81 ${ref.notice}`);
+  }
+  function referralHtml() {
+    if (!featureOn('referrals')) return '';
+    const s = accessState;
+    const r = s && s.ref;
+    if (!r) return '';
+    const myId = escHtml((s && s.id) || '');
+    let top = '';
+    if (r.by) {
+      top = `<div>Referred by <b>${escHtml(r.byName || 'Player')} [${escHtml(String(r.by))}]</b></div>`;
+    } else if (r.canSet) {
+      top = `<div style="margin-bottom:4px;">Did someone send you to War Room? Enter their Torn ID (the number in [ ]) before your first payment:</div>
+        <div style="display:flex;gap:6px;"><input id="tws-in-ref" type="text" inputmode="numeric" placeholder="Their Torn ID" style="flex:1;min-width:0;"><button id="tws-ref-save" type="button" style="background:#2c2140;color:#fff;border:1px solid #6b3fa0;border-radius:6px;padding:4px 10px;">Save</button></div>`;
+    }
+    const own = r.open
+      ? `<div style="margin-top:6px;">Your referral ID: <b>${myId}</b> <span id="tws-ref-copy" style="cursor:pointer;color:#c9a4ff;">(copy)</span><br><span style="color:#aaa;">When someone you refer makes their first payment, you get <b>7 free days</b>.</span></div>`
+      : `<div style="margin-top:6px;color:#aaa;">Referral rewards have ended.</div>`;
+    const earned = r.earned ? `<div style="margin-top:4px;color:#7cfc7c;">Earned so far: <b>${r.earned}</b> free week${r.earned === 1 ? '' : 's'}</div>` : '';
+    return `<div class="tws-ref-box" style="border:1px solid #4a3a66;background:#1f1830;border-radius:8px;padding:8px 10px;margin:8px 0;font-size:12px;line-height:1.4;">
+      <div style="font-weight:bold;margin-bottom:4px;">\ud83c\udf81 Referrals</div>${top}${own}${earned}</div>`;
+  }
+  function wireReferral(body) {
+    const btn = body.querySelector('#tws-ref-save');
+    if (btn) btn.addEventListener('click', async () => {
+      const inp = body.querySelector('#tws-in-ref');
+      const ref = String((inp && inp.value) || '').replace(/[^0-9]/g, '');
+      if (!ref) { showToast('Enter the referrer\u2019s Torn ID (numbers only).'); return; }
+      const me = (accessState && accessState.id) || await accessMyId().catch(() => '');
+      if (!me) { showToast('Add your API key first.'); return; }
+      btn.disabled = true;
+      try {
+        const d = await serverGet(`${REFERRAL_URL}?me=${encodeURIComponent(me)}&ref=${encodeURIComponent(ref)}`);
+        if (d && d.ok) {
+          showToast(`\ud83c\udf81 Saved \u2013 referred by ${d.refName || `player ${ref}`}. Thanks!`);
+          await refreshAccess(true);
+          render();
+        } else {
+          showToast((d && d.error) || 'Couldn\u2019t save that \u2013 try again in a moment.');
+          btn.disabled = false;
+        }
+      } catch (e) {
+        showToast('Couldn\u2019t reach the War Room server \u2013 try again in a moment.');
+        btn.disabled = false;
+      }
+    });
+    const cp = body.querySelector('#tws-ref-copy');
+    if (cp) cp.addEventListener('click', async () => {
+      const ok = await copyToClipboard(String((accessState && accessState.id) || ''));
+      showToast(ok ? 'Referral ID copied' : 'Couldn\u2019t copy \u2013 it\u2019s your Torn ID');
+    });
   }
 
   // Protected factions (set by the owner): War Room is never used against them.
@@ -11817,6 +11887,7 @@ const __twsOuter = (() => {
     let html = '';
     if (s && s.status === 'trial' && s.until) {
       html = `\u23f3 Free trial: <b>${fmtAccessLeft(s.until - Date.now())}</b> left. 1 Xanax to ${accessProfileLink()} = 7 days.`;
+      if (featureOn('referrals') && s.ref && s.ref.canSet) html += ' <span style="color:#aaa;">\ud83c\udf81 Referred by someone? Add their ID in \u2699 Settings.</span>';
     } else if (s && s.status === 'paid' && s.until && s.until - Date.now() < 24 * 3600 * 1000) {
       html = `\u23f3 Access ends in <b>${fmtAccessLeft(s.until - Date.now())}</b>. Send Xanax to ${accessProfileLink()} to extend.`;
     }
