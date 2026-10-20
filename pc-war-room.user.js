@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PC War Room 🖥️ (trial)
 // @namespace    jay-torn-war-script-pcwide
-// @version      1.2.8
+// @version      1.2.9
 // @downloadURL  https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/pc-war-room.user.js
 // @updateURL    https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/pc-war-room.user.js
 // @description  [PC TRIAL - built from Sandbox build 1.85.9] Wide PC layout: Enemy | Home | Attacks log side by side. Run INSTEAD of War Room / the sandbox, not alongside.
@@ -236,7 +236,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.2.8';
+  const SCRIPT_VERSION = '1.2.9';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -1073,7 +1073,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
   // last few minutes instead of the whole war, so it's cheap to poll.
   // ---------------------------------------------------------------------
   const RETAL_WINDOW_SEC = 5 * 60;
-  const RETAL_POLL_MS = 20000;
+  const RETAL_POLL_MS = 30000; // the server checks Torn every 30s too
   let retalMap = {}; // enemy member id (string) -> unix seconds their last successful hit on us resolved
 
   // Result values that mean the ATTACKER didn't actually win the fight --
@@ -10019,13 +10019,15 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
         reportCrash('1s update', e);
       }
     }, TICK_MS);
-    setInterval(() => {
-      if (perfPaused()) return;
+    const retalTick = () => {
+      if (document.visibilityState !== 'visible') return;
       const warEnemy = (pageMode !== 'home' && enemyFactionId) ? enemyFactionId : null;
       if ((featureOn('retalDetect') && warEnemy) || wideLogOn()) {
         refreshRetalWindow(getOwnFactionId(), warEnemy);
       }
-    }, RETAL_POLL_MS);
+    };
+    setInterval(retalTick, RETAL_POLL_MS);
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') setTimeout(retalTick, 300); });
 
     // One-tap blood: pre-load the hidden armoury a few seconds after the page
     // settles (if wanted), and refresh it every 8 minutes so stock is current.
