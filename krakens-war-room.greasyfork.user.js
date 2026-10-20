@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Krakens War Room 🐙
 // @namespace    jay-torn-war-script
-// @version      1.99.34
+// @version      1.99.35
 // @description  Ranked-war companion for Torn: live enemy roster with hospital timers, chain timers & alerts, attack/retal links, targets, attacks log, battle-stat estimates and a PC wide mode. Works in Tampermonkey and Torn PDA. 2-hour free trial, then 1 Xanax = 7 days.
 // @author       -TheKraken- [3616083]
 // @copyright    2026, -TheKraken- [3616083] - All rights reserved
@@ -584,7 +584,7 @@ const __twsOuter = (() => {
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.34';
+  const SCRIPT_VERSION = '1.99.35';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -1445,7 +1445,7 @@ const __twsOuter = (() => {
   // last few minutes instead of the whole war, so it's cheap to poll.
   // ---------------------------------------------------------------------
   const RETAL_WINDOW_SEC = 5 * 60;
-  const RETAL_POLL_MS = 20000;
+  const RETAL_POLL_MS = 30000; // the server checks Torn every 30s too
   let retalMap = {}; // enemy member id (string) -> unix seconds their last successful hit on us resolved
 
   // Result values that mean the ATTACKER didn't actually win the fight --
@@ -12567,13 +12567,17 @@ const __twsOuter = (() => {
         reportCrash('1s update', e);
       }
     }, TICK_MS);
-    setInterval(() => {
-      if (perfPaused()) return;
+    // Retals: only while you can see the page (a hidden tab can't retal),
+    // and straight away when you come back to it.
+    const retalTick = () => {
+      if (document.visibilityState !== 'visible') return;
       const warEnemy = (pageMode !== 'home' && enemyFactionId) ? enemyFactionId : null;
       if ((featureOn('retalDetect') && warEnemy) || atkLogViewing()) {
         refreshRetalWindow(getOwnFactionId(), warEnemy);
       }
-    }, RETAL_POLL_MS);
+    };
+    setInterval(retalTick, RETAL_POLL_MS);
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') setTimeout(retalTick, 300); });
 
     // One-tap blood: pre-load the hidden armoury a few seconds after the page
     // settles (if wanted), and refresh it every 8 minutes so stock is current.
