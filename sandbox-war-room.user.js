@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Sandbox War Room 🧪
 // @namespace    jay-torn-war-script-sandbox
-// @version      1.99.33
+// @version      1.99.34
 // @downloadURL  https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @updateURL    https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @description  [SANDBOX - test build, not for general use] Enemy hospital timers, quick attack links, and a chain timeout alert overlay for Torn faction war pages. Works in Tampermonkey (Firefox) and Torn PDA.
@@ -582,7 +582,7 @@ const __twsOuter = (() => {
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.33';
+  const SCRIPT_VERSION = '1.99.34';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -8154,6 +8154,12 @@ const __twsOuter = (() => {
       if (!isProtectedFaction(enemyId)) rememberEnemy(enemyId);
     }
     if (enemyId && isProtectedFaction(enemyId)) {
+      // At war with a protected faction: ask the server now (it pauses access
+      // for the war) rather than waiting for the daily access check.
+      if (protWarChecked !== String(enemyId)) {
+        protWarChecked = String(enemyId);
+        refreshAccess(true).then((st) => { if (st && !accessAllowed(st)) lockNow(); }).catch(() => {});
+      }
       // Protected faction: no Enemy tab, roster, chain or targets against them.
       mode = 'home';
       enemyId = null;
@@ -11724,7 +11730,10 @@ const __twsOuter = (() => {
   }
   const ACCESS_CACHE_KEY = 'tws_access_v1';
   const ACCESS_ID_KEY = 'tws_access_me';
-  const ACCESS_RECHECK_MS = 30 * 60 * 1000; // expired/locked players are still re-checked straight away
+  // Access is re-checked when it's due to run out (and straight away if it
+  // has), when your faction meets a protected faction in a war, and once a day.
+  const ACCESS_RECHECK_MS = 24 * 3600 * 1000;
+  let protWarChecked = '';
   const COPYRIGHT_TEXT = `\u00a9 ${CREDIT_NAME} [${CREDIT_ID}]. All rights\u200c\u200c\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200b\u200c\u200b\u200c\u200b\u200b\u200c\u200c reserved. Do not copy, modify or redistribute without permission.`;
   const SEND_ITEMS_URL = 'https://www.torn.com/item.php';
   let accessState = null;
