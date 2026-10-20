@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Krakens War Room 🐙
 // @namespace    jay-torn-war-script
-// @version      1.99.30
+// @version      1.99.31
 // @description  Ranked-war companion for Torn: live enemy roster with hospital timers, chain timers & alerts, attack/retal links, targets, attacks log, battle-stat estimates and a PC wide mode. Works in Tampermonkey and Torn PDA. 2-hour free trial, then 1 Xanax = 7 days.
 // @author       -TheKraken- [3616083]
 // @copyright    2026, -TheKraken- [3616083] - All rights reserved
@@ -584,7 +584,7 @@ const __twsOuter = (() => {
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.30';
+  const SCRIPT_VERSION = '1.99.31';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -751,6 +751,7 @@ const __twsOuter = (() => {
 
     // --- Roster actions ---
     { key: 'targets', group: 'Roster actions', label: '☆ Target stars + Target tab' },
+    { key: 'starHold', group: 'Roster actions', label: '\u2605 Targets list: hold the star for half a second to remove a target', hint: 'Stops targets being removed by an accidental tap. Off = a single tap removes them.', requires: 'targets' },
     { key: 'targetCards', group: 'Roster actions', label: '\ud83d\udcc8 Stat cards on starred targets', hint: 'In the Target tab, tap \ud83d\udcc8 on a starred target for their last 5 ranked wars (war hits, hours played) and what they\u2019ve taken since the upcoming war was drawn. Uses your own API key, only when you open a card.', requires: 'targets' },
     { key: 'copyIcons', group: 'Roster actions', label: '⧉ Copy / send-to-faction-chat icon (Enemy tabs)' },
     { key: 'attackSos', group: 'Roster actions', label: '🆘 SOS button on the attack page', hint: 'Small red button in the Faction chat header (attack page, chat open) that puts "HELP NEEDED!" plus the target\u2019s name, level, estimated stats and attack link into faction chat (or copies it if chat isn\u2019t open).' },
@@ -7951,6 +7952,37 @@ const __twsOuter = (() => {
   // focus and dismissing the mobile keyboard mid-type. Direct user actions
   // (gear tap, save button, collapse toggle) still call render() straight
   // away since those are intentional, one-off UI changes.
+  // Redraw without moving: remembers how far each list (and the page) was
+  // scrolled and puts it back straight away, then again once heights settle.
+  function renderKeepScroll() {
+    const saved = [];
+    document.querySelectorAll('#tws-panel #tws-roster').forEach((r) => {
+      const col = r.closest('#tws-body-home, #tws-body-target, #tws-body');
+      saved.push(['R', col ? col.id : '', r.scrollTop]);
+    });
+    ['#tws-panel', '#tws-body', '#tws-body-home', '#tws-col3', '#tws-body-target'].forEach((sel) => {
+      const el = document.querySelector(sel);
+      if (el && el.scrollTop) saved.push(['E', sel, el.scrollTop]);
+    });
+    const wy = window.scrollY || 0;
+    const put = () => {
+      saved.forEach(([k, a, v]) => {
+        if (k === 'R') {
+          const col = a ? document.getElementById(a) : null;
+          const r = col ? col.querySelector('#tws-roster') : null;
+          if (r && Math.abs(r.scrollTop - v) > 1) r.scrollTop = v;
+        } else {
+          const el = document.querySelector(a);
+          if (el && Math.abs(el.scrollTop - v) > 1) el.scrollTop = v;
+        }
+      });
+      if (Math.abs((window.scrollY || 0) - wy) > 1) window.scrollTo(window.scrollX || 0, wy);
+    };
+    if (showSettings) render(); else safeRender();
+    put();
+    requestAnimationFrame(() => { put(); requestAnimationFrame(put); });
+  }
+
   function safeRender__raw() {
     if (showSettings) return;
     
@@ -8818,6 +8850,9 @@ const __twsOuter = (() => {
     .tws-name-flash { animation: tws-flash 1s infinite; }
     .tws-star { cursor: pointer; color: #555; font-size: 13px; }
     .tws-star.tws-star-active { color: #ffd700; }
+    .tws-star { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+    .tws-star[data-hold="1"] { transition: transform .5s linear, text-shadow .5s linear; display: inline-block; }
+    .tws-star.tws-star-holding { transform: scale(1.45); text-shadow: 0 0 8px #ffd700; }
     .tws-copy-icon { cursor: pointer; color: #6ab0de; font-size: 13px; }
     .tws-bounty-icon { cursor: pointer; font-size: 12px; border-radius: 4px; padding: 0 2px; text-decoration: none; filter: grayscale(1) brightness(0.7); }
     .tws-time { min-width: 60px; text-align: right; margin-right: 6px; white-space: nowrap; }
@@ -11244,7 +11279,7 @@ const __twsOuter = (() => {
       const homeCardHtml = (IS_SBX_BUILD && viewSide === 'home' && featureOn('targetCards'))
         ? ` <span class="tws-card-btn" data-card-id="${m.id}" title="Stat card (Sandbox test)">\ud83d\udcc8</span>` : '';
       const starHtml = (isEnemySide && featureOn('targets'))
-        ? ` <span class="tws-star ${isTargeted ? 'tws-star-active' : ''}" data-target-id="${m.id}">${isTargeted ? '★' : '☆'}</span>${isTargeted && featureOn('targetCards') && viewSide === 'target' ? ` <span class="tws-card-btn" data-card-id="${m.id}" title="Stat card">\ud83d\udcc8</span>` : ''}`
+        ? ` <span class="tws-star ${isTargeted ? 'tws-star-active' : ''}" data-target-id="${m.id}"${isTargeted && viewSide === 'target' && featureOn('starHold') ? ' data-hold="1" title="Hold to remove"' : ''}>${isTargeted ? '★' : '☆'}</span>${isTargeted && featureOn('targetCards') && viewSide === 'target' ? ` <span class="tws-card-btn" data-card-id="${m.id}" title="Stat card">\ud83d\udcc8</span>` : ''}`
         : '';
       // Copy icon -- taps to copy name/level/stats/link, for pasting into
       // faction chat. Enemy/target side only, and not in the Respect view.
@@ -11426,16 +11461,43 @@ const __twsOuter = (() => {
       });
     });
     body.querySelectorAll('.tws-star').forEach((el) => {
+      const id = el.dataset.targetId;
+      const toggle = () => {
+        if (targetIds.has(id)) targetIds.delete(id);
+        else targetIds.add(id);
+        saveTargetIds();
+        renderKeepScroll(); // stay where you are in the list
+      };
+      if (el.dataset.hold === '1') {
+        // Targets list: hold the star for half a second to remove the target.
+        let t = null; let sx = 0; let sy = 0;
+        const stop = () => { if (t) { clearTimeout(t); t = null; } el.classList.remove('tws-star-holding'); };
+        el.addEventListener('pointerdown', (e) => {
+          if (e.button !== undefined && e.button !== 0) return;
+          e.stopPropagation();
+          sx = e.clientX; sy = e.clientY;
+          el.classList.add('tws-star-holding');
+          t = setTimeout(() => {
+            t = null;
+            el.classList.remove('tws-star-holding');
+            el.__twsHeld = Date.now();
+            try { if (navigator.vibrate) navigator.vibrate(30); } catch (e2) { /* ignore */ }
+            toggle();
+          }, 500);
+        });
+        el.addEventListener('pointermove', (e) => { if (t && (Math.abs(e.clientX - sx) > 10 || Math.abs(e.clientY - sy) > 10)) stop(); });
+        ['pointerup', 'pointercancel', 'pointerleave'].forEach((ev) => el.addEventListener(ev, stop));
+        el.addEventListener('contextmenu', (e) => e.preventDefault());
+        el.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (el.__twsHeld && Date.now() - el.__twsHeld < 1500) return; // the hold already removed it
+          showToast('Hold \u2605 for half a second to remove this target');
+        });
+        return;
+      }
       el.addEventListener('click', (e) => {
         e.stopPropagation();
-        const id = el.dataset.targetId;
-        if (targetIds.has(id)) {
-          targetIds.delete(id);
-        } else {
-          targetIds.add(id);
-        }
-        saveTargetIds();
-        render();
+        toggle();
       });
     });
 
