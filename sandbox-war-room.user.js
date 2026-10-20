@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Sandbox War Room 🧪
 // @namespace    jay-torn-war-script-sandbox
-// @version      1.99.31
+// @version      1.99.32
 // @downloadURL  https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @updateURL    https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @description  [SANDBOX - test build, not for general use] Enemy hospital timers, quick attack links, and a chain timeout alert overlay for Torn faction war pages. Works in Tampermonkey (Firefox) and Torn PDA.
@@ -582,7 +582,7 @@ const __twsOuter = (() => {
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.31';
+  const SCRIPT_VERSION = '1.99.32';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -2199,7 +2199,7 @@ const __twsOuter = (() => {
     [6, 'Helmet'], [7, 'Legs'], [8, 'Feet'], [9, 'Hands'],
   ]);
   const KI_MAX_LOCAL_CAPTURES = 200;
-  const KI_SYNC_INTERVAL_MS = 60000;
+  const KI_SYNC_INTERVAL_MS = 5 * 60 * 1000; // shared loadouts barely change; your own captures show instantly
   const kiState = { latest: null, syncing: false, syncTimer: null, enriching: false };
 
   function kiLog(...args) { console.info('[Sandbox War Room \u00b7 Kraken Intel]', ...args); }
@@ -2710,7 +2710,8 @@ const __twsOuter = (() => {
   function kiStartSharedSync() {
     if (kiState.syncTimer !== null) clearInterval(kiState.syncTimer);
     if (!featureOn('kiShowIntel')) return;
-    kiState.syncTimer = setInterval(kiSyncSharedIntel, KI_SYNC_INTERVAL_MS);
+    // A pop-out page asks once when it opens; the main page re-checks every 5 minutes.
+    if (!IN_POPOUT_FRAME) kiState.syncTimer = setInterval(kiSyncSharedIntel, KI_SYNC_INTERVAL_MS);
     kiSyncSharedIntel();
   }
 
