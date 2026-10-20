@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Sandbox War Room 🧪
 // @namespace    jay-torn-war-script-sandbox
-// @version      1.99.32
+// @version      1.99.33
 // @downloadURL  https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @updateURL    https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @description  [SANDBOX - test build, not for general use] Enemy hospital timers, quick attack links, and a chain timeout alert overlay for Torn faction war pages. Works in Tampermonkey (Firefox) and Torn PDA.
@@ -582,7 +582,7 @@ const __twsOuter = (() => {
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.32';
+  const SCRIPT_VERSION = '1.99.33';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -2710,8 +2710,8 @@ const __twsOuter = (() => {
   function kiStartSharedSync() {
     if (kiState.syncTimer !== null) clearInterval(kiState.syncTimer);
     if (!featureOn('kiShowIntel')) return;
-    // A pop-out page asks once when it opens; the main page re-checks every 5 minutes.
-    if (!IN_POPOUT_FRAME) kiState.syncTimer = setInterval(kiSyncSharedIntel, KI_SYNC_INTERVAL_MS);
+    // Once when the page (or pop-out) opens -- shared loadouts barely change,
+    // and loadouts you capture yourself show instantly anyway.
     kiSyncSharedIntel();
   }
 
@@ -11724,7 +11724,7 @@ const __twsOuter = (() => {
   }
   const ACCESS_CACHE_KEY = 'tws_access_v1';
   const ACCESS_ID_KEY = 'tws_access_me';
-  const ACCESS_RECHECK_MS = 5 * 60 * 1000;
+  const ACCESS_RECHECK_MS = 30 * 60 * 1000; // expired/locked players are still re-checked straight away
   const COPYRIGHT_TEXT = `\u00a9 ${CREDIT_NAME} [${CREDIT_ID}]. All rights\u200c\u200c\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200b\u200c\u200b\u200c\u200b\u200b\u200c\u200c reserved. Do not copy, modify or redistribute without permission.`;
   const SEND_ITEMS_URL = 'https://www.torn.com/item.php';
   let accessState = null;
@@ -11823,7 +11823,7 @@ const __twsOuter = (() => {
     let id = '';
     try { id = await accessMyId(); } catch (e) { id = ''; }
     if (!id) return (accessState = cached);
-    if (!force && cached && cached.id === id && Date.now() - cached.checkedAt < ACCESS_RECHECK_MS &&
+    if (!force && cached && cached.id === id && accessAllowed(cached) && Date.now() - cached.checkedAt < ACCESS_RECHECK_MS &&
         !(cached.until && cached.until <= Date.now())) {
       return (accessState = cached);
     }
