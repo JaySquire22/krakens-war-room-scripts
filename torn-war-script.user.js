@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Krakens War Room 🐙
 // @namespace    jay-torn-war-script
-// @version      1.99.31
+// @version      1.99.34
 // @downloadURL  https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/torn-war-script.user.js
 // @updateURL    https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/torn-war-script.user.js
 // @description  Enemy hospital timers, quick attack links, and a chain timeout alert overlay for Torn faction war pages. Works in Tampermonkey (Firefox) and Torn PDA.
@@ -582,7 +582,7 @@ const __twsOuter = (() => {
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.31';
+  const SCRIPT_VERSION = '1.99.34';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -2199,7 +2199,7 @@ const __twsOuter = (() => {
     [6, 'Helmet'], [7, 'Legs'], [8, 'Feet'], [9, 'Hands'],
   ]);
   const KI_MAX_LOCAL_CAPTURES = 200;
-  const KI_SYNC_INTERVAL_MS = 60000;
+  const KI_SYNC_INTERVAL_MS = 5 * 60 * 1000; // shared loadouts barely change; your own captures show instantly
   const kiState = { latest: null, syncing: false, syncTimer: null, enriching: false };
 
   function kiLog(...args) { console.info('[Krakens War Room \u00b7 Kraken Intel]', ...args); }
@@ -2710,7 +2710,8 @@ const __twsOuter = (() => {
   function kiStartSharedSync() {
     if (kiState.syncTimer !== null) clearInterval(kiState.syncTimer);
     if (!featureOn('kiShowIntel')) return;
-    kiState.syncTimer = setInterval(kiSyncSharedIntel, KI_SYNC_INTERVAL_MS);
+    // Once when the page (or pop-out) opens -- shared loadouts barely change,
+    // and loadouts you capture yourself show instantly anyway.
     kiSyncSharedIntel();
   }
 
@@ -8153,6 +8154,12 @@ const __twsOuter = (() => {
       if (!isProtectedFaction(enemyId)) rememberEnemy(enemyId);
     }
     if (enemyId && isProtectedFaction(enemyId)) {
+      // At war with a protected faction: ask the server now (it pauses access
+      // for the war) rather than waiting for the daily access check.
+      if (protWarChecked !== String(enemyId)) {
+        protWarChecked = String(enemyId);
+        refreshAccess(true).then((st) => { if (st && !accessAllowed(st)) lockNow(); }).catch(() => {});
+      }
       // Protected faction: no Enemy tab, roster, chain or targets against them.
       mode = 'home';
       enemyId = null;
@@ -11723,7 +11730,10 @@ const __twsOuter = (() => {
   }
   const ACCESS_CACHE_KEY = 'tws_access_v1';
   const ACCESS_ID_KEY = 'tws_access_me';
-  const ACCESS_RECHECK_MS = 5 * 60 * 1000;
+  // Access is re-checked when it's due to run out (and straight away if it
+  // has), when your faction meets a protected faction in a war, and once a day.
+  const ACCESS_RECHECK_MS = 24 * 3600 * 1000;
+  let protWarChecked = '';
   const COPYRIGHT_TEXT = `\u00a9 ${CREDIT_NAME} [${CREDIT_ID}]. All rights\u200c\u200c\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200b\u200c\u200b\u200c\u200b\u200b\u200c\u200c reserved. Do not copy, modify or redistribute without permission.`;
   const SEND_ITEMS_URL = 'https://www.torn.com/item.php';
   let accessState = null;
@@ -11822,7 +11832,7 @@ const __twsOuter = (() => {
     let id = '';
     try { id = await accessMyId(); } catch (e) { id = ''; }
     if (!id) return (accessState = cached);
-    if (!force && cached && cached.id === id && Date.now() - cached.checkedAt < ACCESS_RECHECK_MS &&
+    if (!force && cached && cached.id === id && accessAllowed(cached) && Date.now() - cached.checkedAt < ACCESS_RECHECK_MS &&
         !(cached.until && cached.until <= Date.now())) {
       return (accessState = cached);
     }
