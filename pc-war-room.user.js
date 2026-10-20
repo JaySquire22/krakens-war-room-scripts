@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PC War Room 🖥️ (trial)
 // @namespace    jay-torn-war-script-pcwide
-// @version      1.2.7
+// @version      1.2.8
 // @downloadURL  https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/pc-war-room.user.js
 // @updateURL    https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/pc-war-room.user.js
 // @description  [PC TRIAL - built from Sandbox build 1.85.9] Wide PC layout: Enemy | Home | Attacks log side by side. Run INSTEAD of War Room / the sandbox, not alongside.
@@ -236,7 +236,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.2.7';
+  const SCRIPT_VERSION = '1.2.8';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -1784,7 +1784,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
   function kiStartSharedSync() {
     if (kiState.syncTimer !== null) clearInterval(kiState.syncTimer);
     if (!featureOn('kiShowIntel')) return;
-    kiState.syncTimer = setInterval(kiSyncSharedIntel, KI_SYNC_INTERVAL_MS);
+    // Once when the page opens -- shared loadouts barely change.
     kiSyncSharedIntel();
   }
 
@@ -9661,7 +9661,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
   const ACCESS_URL = 'https://dashing-fish-54.eu-west-1.convex.site/access';
   const ACCESS_CACHE_KEY = 'tws_access_v1';
   const ACCESS_ID_KEY = 'tws_access_me';
-  const ACCESS_RECHECK_MS = 5 * 60 * 1000;
+  const ACCESS_RECHECK_MS = 6 * 3600 * 1000; // plus straight away when access runs out
   const COPYRIGHT_TEXT = `\u00a9 ${CREDIT_NAME} [${CREDIT_ID}]. All rights\u200c\u200c\u200b\u200c\u200c\u200c\u200b\u200b\u200c\u200b\u200c\u200c\u200b\u200c\u200b\u200c\u200b\u200c\u200b\u200b\u200c\u200c reserved. Do not copy, modify or redistribute without permission.`;
   const SEND_ITEMS_URL = 'https://www.torn.com/item.php';
   let accessState = null;
@@ -9741,7 +9741,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
     let id = '';
     try { id = await accessMyId(); } catch (e) { id = ''; }
     if (!id) return (accessState = cached);
-    if (!force && cached && cached.id === id && Date.now() - cached.checkedAt < ACCESS_RECHECK_MS &&
+    if (!force && cached && cached.id === id && accessAllowed(cached) && Date.now() - cached.checkedAt < ACCESS_RECHECK_MS &&
         !(cached.until && cached.until <= Date.now())) {
       return (accessState = cached);
     }
