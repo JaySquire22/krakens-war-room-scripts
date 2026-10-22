@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Krakens War Room 🐙
 // @namespace    jay-torn-war-script
-// @version      1.99.35
+// @version      1.99.37
 // @description  Ranked-war companion for Torn: live enemy roster with hospital timers, chain timers & alerts, attack/retal links, targets, attacks log, battle-stat estimates and a PC wide mode. Works in Tampermonkey and Torn PDA. 2-hour free trial, then 1 Xanax = 7 days.
 // @author       -TheKraken- [3616083]
 // @copyright    2026, -TheKraken- [3616083] - All rights reserved
@@ -584,7 +584,7 @@ const __twsOuter = (() => {
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.35';
+  const SCRIPT_VERSION = '1.99.37';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -716,6 +716,7 @@ const __twsOuter = (() => {
   // wording are edited in Advanced -> 💰 Bounty amounts.)
   const FEATURES = [
     // --- Panel & pages ---
+    { key: 'creditAlerts', group: 'Panel & pages', label: '\ud83c\udf9f\ufe0f War credit reminders', hint: 'A note in the panel when you\u2019re out of war credits, and a heads-up when your faction draws a war and you have none.' },
     { key: 'referrals', group: 'Panel & pages', label: '\ud83c\udf81 Referrals box in Settings (and the reminder during your trial)', hint: 'Enter who referred you, and see your own referral ID and the free weeks you\u2019ve earned.' },
     { key: 'everyPage', group: 'Panel & pages', label: 'Run on every Torn page (off = faction pages only)', hint: 'Keeps the timers, chain alerts, 🩸 and chat working wherever you are in Torn. Takes effect the next time a page loads.' },
     { key: 'fixedTop', group: 'Panel & pages', label: 'Keep chain timers and tabs fixed at the top of the panel', hint: 'Off = they scroll away with the member list, like older versions.' },
@@ -8130,6 +8131,7 @@ const __twsOuter = (() => {
     const postWar = (ownData && !apiWar && lw) ? lw : null;
     if (ownData) postWarInfo = postWar; // (a failed request keeps the previous state)
     if (ownData) liveWar = (apiWar && apiWar.started) ? apiWar : null;
+    if (apiWar) { try { creditWarCheck(apiWar); creditDrawnNotice(apiWar); } catch (e) { /* never break the refresh */ } }
 
     let mode = classified.mode;
     let enemyId = classified.enemyId;
@@ -11713,7 +11715,8 @@ const __twsOuter = (() => {
 
   // ---------------------------------------------------------------------
   // ACCESS  (© -TheKraken- [3616083] -- all rights reserved)
-  // 2-hour free trial, then 1 Xanax sent to -TheKraken- = 7 days (stacks).
+  // 6-hour free trial, then 1 Xanax sent to -TheKraken- = 7 days (stacks).
+  // War credits (after go-live): 1 Xanax = 1 war -- see "War credits" below.
   // The owner and the exempt factions always have free access. The access
   // server decides; this copy asks it on load (answer cached 5 minutes) and
   // re-checks whenever a trial or paid week runs out.
@@ -11841,7 +11844,8 @@ const __twsOuter = (() => {
     try {
       let fa = '';
       try { fa = await factionApiFlag(); } catch (e) { fa = ''; }
-      const d = await serverGet(`${ACCESS_URL}?id=${encodeURIComponent(id)}${fa ? `&fa=${fa}` : ''}${buildReportQS()}`);
+      const ct = (String(id) === String(CREDIT_ID) && getCfg(CT_KEY, false) === true) ? '&ct=1' : '';
+      const d = await serverGet(`${ACCESS_URL}?id=${encodeURIComponent(id)}${fa ? `&fa=${fa}` : ''}${ct}${buildReportQS()}`);
       if (d && d.status) {
         const s = {
           id, status: d.status, until: d.until || null, paidBefore: !!d.paidBefore, checkedAt: Date.now(),
@@ -11849,7 +11853,11 @@ const __twsOuter = (() => {
           warLock: d.warLock || null,
           via: d.via || '',
           ref: d.ref || null,
+          cm: !!d.cm, credits: Number(d.credits) || 0, testCust: !!d.testCust, gift: !!d.gift,
+          cmReason: d.reason || '', inWar: !!d.inWar, warCovered: !!d.warCovered, warEnd: Number(d.warEnd) || 0,
+          peaceFree: !!d.peaceUntilNextWar,
         };
+        if (s.cm && d.charged) setTimeout(() => showToast(`\ud83c\udf9f\ufe0f 1 war credit used \u2013 War Room is covered for this whole war. ${s.credits} credit${s.credits === 1 ? '' : 's'} left.`), 1500);
         setCfg(ACCESS_CACHE_KEY, JSON.stringify(s));
         try { announceReferralReward(s.ref); } catch (e) { /* ignore */ }
         return (accessState = s);
@@ -11886,7 +11894,7 @@ const __twsOuter = (() => {
         <div style="display:flex;gap:6px;"><input id="tws-in-ref" type="text" inputmode="numeric" placeholder="Their Torn ID" style="flex:1;min-width:0;"><button id="tws-ref-save" type="button" style="background:#2c2140;color:#fff;border:1px solid #6b3fa0;border-radius:6px;padding:4px 10px;">Save</button></div>`;
     }
     const own = r.open
-      ? `<div style="margin-top:6px;">Your referral ID: <b>${myId}</b> <span id="tws-ref-copy" style="cursor:pointer;color:#c9a4ff;">(copy)</span><br><span style="color:#aaa;">When someone you refer makes their first payment, you get <b>7 free days</b>.</span></div>`
+      ? `<div style="margin-top:6px;">Your referral ID: <b>${myId}</b> <span id="tws-ref-copy" style="cursor:pointer;color:#c9a4ff;">(copy)</span><br><span style="color:#aaa;">When someone you refer makes their first payment, you get <b>${s && s.cm ? '1 free war credit' : '7 free days'}</b>.</span></div>`
       : `<div style="margin-top:6px;color:#aaa;">Referral rewards have ended.</div>`;
     const earned = r.earned ? `<div style="margin-top:4px;color:#7cfc7c;">Earned so far: <b>${r.earned}</b> free week${r.earned === 1 ? '' : 's'}</div>` : '';
     return `<div class="tws-ref-box" style="border:1px solid #4a3a66;background:#1f1830;border-radius:8px;padding:8px 10px;margin:8px 0;font-size:12px;line-height:1.4;">
@@ -11930,6 +11938,47 @@ const __twsOuter = (() => {
     return !!(s && Array.isArray(s.prot) && s.prot.includes(String(id)));
   }
 
+  // ---- War credits (1 Xanax = 1 war) ----
+  // The server decides; these only describe the answer. The owner can switch
+  // on "test as a customer" to see the credit rules before they go live.
+  const CT_KEY = 'tws_test_customer';
+  const CM_WAR_KEY = 'tws_cm_war';
+  const CM_DRAWN_KEY = 'tws_cm_drawn';
+  function creditCountText(n) { return `${n} war credit${n === 1 ? '' : 's'}`; }
+  function creditStatusText(s) {
+    if (!s || !s.cm) return '';
+    if (s.status === 'trial') return `Free trial \u2013 you have ${creditCountText(s.credits)}.`;
+    if (s.gift) return `Free time from ${CREDIT_NAME} \u2013 you have ${creditCountText(s.credits)}.`;
+    if (s.via === 'faction') return `Faction pass \u2013 you have ${creditCountText(s.credits)}.`;
+    if (s.cmReason === 'war-covered' || s.cmReason === 'war-charged') return `\u2694\ufe0f Covered for this war. ${creditCountText(s.credits)} left.`;
+    if (s.cmReason === 'peace-credit') return `${creditCountText(s.credits)}. Free between wars; 1 is used the first time you open War Room in a ranked war.`;
+    if (s.cmReason === 'peace-free') return `0 war credits. Free until your faction\u2019s next ranked war starts.`;
+    if (s.cmReason === 'war-no-credit') return 'Out of war credits for this war.';
+    return 'Out of war credits.';
+  }
+  // Once per war: when your faction's ranked war starts, ask the server so the
+  // war is covered (1 credit) or locked if you have none.
+  function creditWarCheck(war) {
+    const s = accessState;
+    if (!s || !s.cm || !war || !war.started) return;
+    if (['owner', 'faction', 'blocked', 'warlock'].includes(s.status)) return;
+    const key = `${war.enemyId}:${war.startTime}`;
+    if (getCfg(CM_WAR_KEY, '') === key) return;
+    setCfg(CM_WAR_KEY, key);
+    refreshAccess(true).then((st) => { renderAccessStrip(); if (st && !accessAllowed(st)) lockNow(); }).catch(() => {});
+  }
+  // Once per drawn war: a heads-up if you have no credits for it.
+  function creditDrawnNotice(war) {
+    const s = accessState;
+    if (!s || !s.cm || !war || war.started || !featureOn('creditAlerts')) return;
+    if (s.status !== 'paid' && s.status !== 'trial' && s.status !== 'expired') return;
+    if (s.credits > 0 || s.via === 'faction' || s.gift) return;
+    const key = `${war.enemyId}:${war.startTime}`;
+    if (getCfg(CM_DRAWN_KEY, '') === key) return;
+    setCfg(CM_DRAWN_KEY, key);
+    showToast('\ud83c\udf9f\ufe0f Your faction has a ranked war coming up and you have 0 war credits. Send 1 Xanax to -TheKraken- to use War Room during it.');
+  }
+
   // No answer yet (no API key saved, or server never reached) = allowed.
   function accessAllowed(s) {
     if (!s) return true;
@@ -11959,7 +12008,15 @@ const __twsOuter = (() => {
     if (!el) return;
     const s = accessState;
     let html = '';
-    if (s && s.status === 'trial' && s.until) {
+    if (s && s.cm) {
+      if (s.status === 'trial' && s.until) {
+        html = `\u23f3 Free trial: <b>${fmtAccessLeft(s.until - Date.now())}</b> left. 1 Xanax to ${accessProfileLink()} = 1 war credit.`;
+        if (featureOn('referrals') && s.ref && s.ref.canSet) html += ' <span style="color:#aaa;">\ud83c\udf81 Referred by someone? Add their ID in \u2699 Settings.</span>';
+      } else if (s.status === 'paid' && !s.gift && s.via !== 'faction' && s.credits === 0 && s.cmReason === 'peace-free' && featureOn('creditAlerts')) {
+        html = `\ud83c\udf9f\ufe0f <b>Out of war credits.</b> Free until your faction\u2019s next ranked war. 1 Xanax to ${accessProfileLink()} = 1 war.`;
+      }
+      if (s.testCust) html = `<span style="color:#ffcc66;">\ud83e\uddea Testing as a customer</span> \u00b7 ${creditStatusText(s)}${html ? '<br>' + html : ''}`;
+    } else if (s && s.status === 'trial' && s.until) {
       html = `\u23f3 Free trial: <b>${fmtAccessLeft(s.until - Date.now())}</b> left. 1 Xanax to ${accessProfileLink()} = 7 days.`;
       if (featureOn('referrals') && s.ref && s.ref.canSet) html += ' <span style="color:#aaa;">\ud83c\udf81 Referred by someone? Add their ID in \u2699 Settings.</span>';
     } else if (s && s.status === 'paid' && s.until && s.until - Date.now() < 24 * 3600 * 1000) {
@@ -11981,9 +12038,20 @@ const __twsOuter = (() => {
     else if (s.status === 'blocked') line = 'Access: removed by the owner';
     else if (s.status === 'warlock') line = 'Access: paused during your war with a protected faction';
     else line = 'Access: expired';
-    const extra = (s && (s.status === 'paid' || s.status === 'trial'))
+    let extra = (s && (s.status === 'paid' || s.status === 'trial'))
       ? `<br>1 Xanax to ${accessProfileLink()} = 7 more days` : '';
-    return `<div style="color:#888;font-size:10px;margin:-4px 0 8px;text-align:center;">${line}${extra}<br><span style="color:#666;">${COPYRIGHT_TEXT}</span></div>`;
+    if (s && s.cm) {
+      if (s.status === 'paid') line = 'Access: active';
+      else if (s.status === 'expired') line = 'Access: locked';
+      extra = `<div style="margin:6px auto 2px;max-width:300px;border:1px solid #4a3a66;background:#1f1830;border-radius:8px;padding:6px 8px;font-size:12px;color:#ddd;line-height:1.4;">
+        \ud83c\udf9f\ufe0f War credits: <b style="color:#fff;font-size:14px;">${s.credits}</b><br><span style="color:#bbb;">${creditStatusText(s)}</span><br>
+        <span style="color:#999;font-size:11px;">1 Xanax to ${accessProfileLink()} = 1 war. A credit is only used if you open War Room during a ranked war, and covers that whole war.</span></div>`;
+    }
+    const ownerNow = !!(s && String(s.id) === String(CREDIT_ID));
+    const ctBtn = ownerNow
+      ? `<br><span id="tws-ct-toggle" style="cursor:pointer;color:#c9a4ff;">${getCfg(CT_KEY, false) === true ? '\ud83e\uddea Testing as a customer \u2013 tap to stop' : '\ud83e\uddea Test war credits as a customer'}</span>`
+      : '';
+    return `<div style="color:#888;font-size:10px;margin:-4px 0 8px;text-align:center;">${line}${extra}${ctBtn}<br><span style="color:#666;">${COPYRIGHT_TEXT}</span></div>`;
   }
 
   function showLockScreen() {
@@ -11996,9 +12064,14 @@ const __twsOuter = (() => {
       ? `\u2694\ufe0f Your faction is at war with <b>${vsName}</b>. Krakens War Room can\u2019t be used against Glory factions, so it\u2019s paused until this war ends.`
       : blocked
       ? 'Your access to Krakens War Room has been removed by the owner.'
+      : (s && s.cm && s.cmReason === 'war-no-credit')
+        ? '\u2694\ufe0f Your faction is in a ranked war and you have <b>0 war credits</b>. Send 1 Xanax to use Krakens War Room for the whole war.'
+      : (s && s.cm && s.paidBefore)
+        ? 'You\u2019re out of war credits. Your faction has had a ranked war since your last one, so a credit is needed.'
       : s && s.paidBefore
         ? 'Your Krakens War Room access has run out.'
-        : 'Your 2-hour free trial of Krakens War Room has ended.';
+        : 'Your 6-hour free trial of Krakens War Room has ended.';
+    const cmLock = !!(s && s.cm);
     const el = document.createElement('div');
     el.id = 'tws-lock';
     el.style.cssText = 'position:fixed;left:50%;bottom:12px;transform:translateX(-50%);z-index:999999;width:min(340px,calc(100vw - 24px));box-sizing:border-box;background:#1b1426;color:#ddd;border:1px solid #6b3fa0;border-radius:10px;box-shadow:0 4px 18px rgba(0,0,0,.6);font:13px/1.45 Arial,sans-serif;padding:10px 12px;';
@@ -12017,15 +12090,18 @@ const __twsOuter = (() => {
           <button id="tws-lock-check" type="button" style="flex:1;background:#2c2140;color:#fff;border:1px solid #6b3fa0;border-radius:6px;padding:7px 0;font-size:13px;">Check again</button>
         </div>` : ''}
         ${(blocked || warLock) ? '' : `
-        <div style="margin-bottom:6px;">Send <b>1 Xanax</b> to ${accessProfileLink()} for <b>7 days</b> of access. Send more to stack weeks (2 = 14 days, and so on).</div>
+        ${cmLock
+          ? `<div style="margin-bottom:6px;">Send <b>1 Xanax</b> to ${accessProfileLink()} for <b>1 war credit</b>. A credit covers a whole ranked war, and you only use one if you open War Room during the war. Between wars it\u2019s free. Send more to stock up.</div>`
+          : `<div style="margin-bottom:6px;">Send <b>1 Xanax</b> to ${accessProfileLink()} for <b>7 days</b> of access. Send more to stack weeks (2 = 14 days, and so on).</div>`}
         <div style="color:#aaa;font-size:11px;margin-bottom:8px;">Items \u2192 Drugs \u2192 Xanax \u2192 Send, to player ID <b>${CREDIT_ID}</b>. Access unlocks automatically within a couple of minutes.</div>
-        <div style="margin-bottom:8px;font-size:12px;">\ud83d\udc65 <b>Whole faction:</b> one player sends <b>$500,000 per faction member</b> to ${accessProfileLink()} with <b>FACTIONPAY</b> in the message. Everyone in the faction gets 7 days. Part-payments are held until topped up.</div>
+        <div style="margin-bottom:8px;font-size:12px;">\ud83d\udc65 <b>Whole faction:</b> one player sends <b>$500,000 per faction member</b> to ${accessProfileLink()} with <b>FACTIONPAY</b> in the message. Everyone in the faction gets ${cmLock ? '1 war credit' : '7 days'}. Part-payments are held until topped up.</div>
         <div style="display:flex;gap:6px;">
           <a href="${SEND_ITEMS_URL}" style="flex:1;text-align:center;background:#6b3fa0;color:#fff;border-radius:6px;padding:7px 0;text-decoration:none;">Open Items</a>
           <button id="tws-lock-check" type="button" style="flex:1;background:#2c2140;color:#fff;border:1px solid #6b3fa0;border-radius:6px;padding:7px 0;font-size:13px;">Check again</button>
         </div>
         `}
         <div id="tws-lock-msg" style="color:#c9a4ff;font-size:11px;margin-top:6px;min-height:1em;"></div>
+        ${(s && s.testCust) ? '<div id="tws-ct-toggle" style="cursor:pointer;color:#ffcc66;font-size:12px;margin-top:4px;">\ud83e\uddea Testing as a customer \u2013 tap to stop</div>' : ''}
         <div style="color:#666;font-size:10px;margin-top:4px;">${COPYRIGHT_TEXT}</div>
       </div>`;
     document.body.appendChild(el);
@@ -12053,6 +12129,21 @@ const __twsOuter = (() => {
       }
     });
   }
+
+  document.addEventListener('click', async (e) => {
+    const t = e.target && e.target.closest ? e.target.closest('#tws-ct-toggle') : null;
+    if (!t) return;
+    const on = getCfg(CT_KEY, false) !== true;
+    setCfg(CT_KEY, on);
+    setCfg(CM_WAR_KEY, '');
+    t.textContent = 'Checking\u2026';
+    const st = await refreshAccess(true);
+    showToast(on ? '\ud83e\uddea Testing as a customer: war credit rules apply to you now.' : 'Back to owner access.');
+    renderAccessStrip();
+    try { render(); } catch (err) { /* panel not open */ }
+    if (st && !accessAllowed(st)) lockNow();
+    else if (st && accessAllowed(st) && document.getElementById('tws-lock')) location.reload();
+  });
 
   function lockNow() {
     const p = document.getElementById('tws-panel');
