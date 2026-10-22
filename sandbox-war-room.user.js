@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Sandbox War Room 🧪
 // @namespace    jay-torn-war-script-sandbox
-// @version      1.99.36
+// @version      1.99.37
 // @downloadURL  https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @updateURL    https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @description  [SANDBOX - test build, not for general use] Enemy hospital timers, quick attack links, and a chain timeout alert overlay for Torn faction war pages. Works in Tampermonkey (Firefox) and Torn PDA.
@@ -582,7 +582,7 @@ const __twsOuter = (() => {
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.36';
+  const SCRIPT_VERSION = '1.99.37';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -12099,6 +12099,7 @@ const __twsOuter = (() => {
         </div>
         `}
         <div id="tws-lock-msg" style="color:#c9a4ff;font-size:11px;margin-top:6px;min-height:1em;"></div>
+        ${(s && s.testCust) ? '<div id="tws-ct-toggle" style="cursor:pointer;color:#ffcc66;font-size:12px;margin-top:4px;">\ud83e\uddea Testing as a customer \u2013 tap to stop</div>' : ''}
         <div style="color:#666;font-size:10px;margin-top:4px;">${COPYRIGHT_TEXT}</div>
       </div>`;
     document.body.appendChild(el);
@@ -12139,6 +12140,7 @@ const __twsOuter = (() => {
     renderAccessStrip();
     try { render(); } catch (err) { /* panel not open */ }
     if (st && !accessAllowed(st)) lockNow();
+    else if (st && accessAllowed(st) && document.getElementById('tws-lock')) location.reload();
   });
 
   function lockNow() {
