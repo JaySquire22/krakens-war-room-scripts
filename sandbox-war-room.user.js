@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Sandbox War Room 🧪
 // @namespace    jay-torn-war-script-sandbox
-// @version      1.99.37
+// @version      1.99.38
 // @downloadURL  https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @updateURL    https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @description  [SANDBOX - test build, not for general use] Enemy hospital timers, quick attack links, and a chain timeout alert overlay for Torn faction war pages. Works in Tampermonkey (Firefox) and Torn PDA.
@@ -582,7 +582,7 @@ const __twsOuter = (() => {
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.37';
+  const SCRIPT_VERSION = '1.99.38';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -12340,7 +12340,11 @@ const __twsOuter = (() => {
     try {
       if (!/\/profiles\.php/i.test(win.location.pathname)) return null;
       const m = String(win.location.href).match(/XID=(\d+)/i);
-      return m ? m[1] : null;
+      if (!m) return null;
+      // Your own profile: you can't attack yourself, so no Attack button.
+      const me = myIdCached();
+      if (me && String(me) === m[1]) return null;
+      return m[1];
     } catch (e) { return null; }
   }
   function profileTargetId() { return profileTargetIdIn(window); }
