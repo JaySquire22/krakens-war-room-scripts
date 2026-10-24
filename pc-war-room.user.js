@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PC War Room 🖥️ (trial)
 // @namespace    jay-torn-war-script-pcwide
-// @version      1.2.10
+// @version      1.2.11
 // @downloadURL  https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/pc-war-room.user.js
 // @updateURL    https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/pc-war-room.user.js
 // @description  [PC TRIAL - built from Sandbox build 1.85.9] Wide PC layout: Enemy | Home | Attacks log side by side. Run INSTEAD of War Room / the sandbox, not alongside.
@@ -236,7 +236,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.2.10';
+  const SCRIPT_VERSION = '1.2.11';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -9882,7 +9882,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
     if (document.getElementById('tws-lock') || !document.body) return;
     const s = accessState;
     const heading = (s && s.status === 'warlock')
-      ? `\u2694\ufe0f Your faction is at war with <b>${escHtml((s.warLock && s.warLock.vs) || 'a protected faction')}</b>. War Room can\u2019t be used against Glory factions, so it\u2019s paused until this war ends. Any paid or trial time you lose will be refunded: message ${accessProfileLink()} and it\u2019s added back once the war has ended.`
+      ? `\u2694\ufe0f Your faction is at war with <b>${escHtml((s.warLock && s.warLock.vs) || 'a protected faction')}</b>. PC War Room cannot be used against its creator\u2019s faction, so it\u2019s paused until this war ends. You will not be charged a credit for this.`
       : (s && s.status === 'blocked')
       ? 'Your access has been removed by the owner.'
       : (s && s.cm && s.cmReason === 'war-no-credit')
@@ -9904,12 +9904,12 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
       </div>
       <div id="tws-lock-body" style="margin-top:6px;">
         <div style="margin-bottom:6px;">${heading}</div>
-        ${cmLock
+        ${(s && s.status === 'warlock') ? '' : cmLock
           ? `<div style="margin-bottom:6px;">Send <b>1 Xanax</b> to ${accessProfileLink()} for <b>1 war credit</b>. A credit covers a whole ranked war, and you only use one if you open War Room during the war. Between wars it\u2019s free. Send more to stock up.</div>`
           : `<div style="margin-bottom:6px;">Send <b>1 Xanax</b> to ${accessProfileLink()} for <b>7 days</b> of access. Send more to stack weeks (2 = 14 days, and so on).</div>`}
-        <div style="color:#aaa;font-size:11px;margin-bottom:8px;">Items \u2192 Drugs \u2192 Xanax \u2192 Send, to player ID <b>${CREDIT_ID}</b>. Access unlocks automatically within a couple of minutes.</div>
+        ${(s && s.status === 'warlock') ? '' : `<div style="color:#aaa;font-size:11px;margin-bottom:8px;">Items \u2192 Drugs \u2192 Xanax \u2192 Send, to player ID <b>${CREDIT_ID}</b>. Access unlocks automatically within a couple of minutes.</div>`}
         <div style="display:flex;gap:6px;">
-          <a href="${SEND_ITEMS_URL}" style="flex:1;text-align:center;background:#6b3fa0;color:#fff;border-radius:6px;padding:7px 0;text-decoration:none;">Open Items</a>
+          ${(s && s.status === 'warlock') ? '' : `<a href="${SEND_ITEMS_URL}" style="flex:1;text-align:center;background:#6b3fa0;color:#fff;border-radius:6px;padding:7px 0;text-decoration:none;">Open Items</a>`}
           <button id="tws-lock-check" type="button" style="flex:1;background:#2c2140;color:#fff;border:1px solid #6b3fa0;border-radius:6px;padding:7px 0;font-size:13px;">Check again</button>
         </div>
         <div id="tws-lock-msg" style="color:#c9a4ff;font-size:11px;margin-top:6px;min-height:1em;"></div>
