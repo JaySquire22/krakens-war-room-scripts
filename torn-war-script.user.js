@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Krakens War Room 🐙
 // @namespace    jay-torn-war-script
-// @version      1.99.37
+// @version      1.99.39
 // @downloadURL  https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/torn-war-script.user.js
 // @updateURL    https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/torn-war-script.user.js
 // @description  Enemy hospital timers, quick attack links, and a chain timeout alert overlay for Torn faction war pages. Works in Tampermonkey (Firefox) and Torn PDA.
@@ -582,7 +582,7 @@ const __twsOuter = (() => {
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.37';
+  const SCRIPT_VERSION = '1.99.39';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -12059,7 +12059,7 @@ const __twsOuter = (() => {
     const warLock = !!(s && s.status === 'warlock');
     const vsName = escHtml((s && s.warLock && s.warLock.vs) || 'a protected faction');
     const heading = warLock
-      ? `\u2694\ufe0f Your faction is at war with <b>${vsName}</b>. Krakens War Room can\u2019t be used against Glory factions, so it\u2019s paused until this war ends.`
+      ? `\u2694\ufe0f Your faction is at war with <b>${vsName}</b>. Krakens War Room cannot be used against its creator\u2019s faction, so it\u2019s paused until this war ends. You will not be charged a credit for this.`
       : blocked
       ? 'Your access to Krakens War Room has been removed by the owner.'
       : (s && s.cm && s.cmReason === 'war-no-credit')
@@ -12082,9 +12082,7 @@ const __twsOuter = (() => {
       <div id="tws-lock-body" style="margin-top:6px;">
         <div style="margin-bottom:6px;">${heading}</div>
         ${warLock ? `
-        <div style="margin-bottom:6px;">Any paid or trial time you lose during the war will be refunded. Message ${accessProfileLink()} and the time will be added back once the war has ended.</div>
         <div style="display:flex;gap:6px;">
-          <a href="https://www.torn.com/messages.php#/p=compose&XID=${CREDIT_ID}" style="flex:1;text-align:center;background:#6b3fa0;color:#fff;border-radius:6px;padding:7px 0;text-decoration:none;">Message ${CREDIT_NAME}</a>
           <button id="tws-lock-check" type="button" style="flex:1;background:#2c2140;color:#fff;border:1px solid #6b3fa0;border-radius:6px;padding:7px 0;font-size:13px;">Check again</button>
         </div>` : ''}
         ${(blocked || warLock) ? '' : `
@@ -12340,7 +12338,11 @@ const __twsOuter = (() => {
     try {
       if (!/\/profiles\.php/i.test(win.location.pathname)) return null;
       const m = String(win.location.href).match(/XID=(\d+)/i);
-      return m ? m[1] : null;
+      if (!m) return null;
+      // Your own profile: you can't attack yourself, so no Attack button.
+      const me = myIdCached();
+      if (me && String(me) === m[1]) return null;
+      return m[1];
     } catch (e) { return null; }
   }
   function profileTargetId() { return profileTargetIdIn(window); }
