@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PC War Room 🖥️ (trial)
 // @namespace    jay-torn-war-script-pcwide
-// @version      1.2.11
+// @version      1.2.12
 // @downloadURL  https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/pc-war-room.user.js
 // @updateURL    https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/pc-war-room.user.js
 // @description  [PC TRIAL - built from Sandbox build 1.85.9] Wide PC layout: Enemy | Home | Attacks log side by side. Run INSTEAD of War Room / the sandbox, not alongside.
@@ -236,7 +236,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.2.11';
+  const SCRIPT_VERSION = '1.2.12';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -8745,6 +8745,28 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
     return ts ? new Date(ts * 1000).toISOString().slice(11, 19) : '--:--:--';
   }
 
+
+  // Battle-stat estimates for every name in the Attacks log. Members of the
+  // war rosters already have theirs; anyone else is looked up in batches
+  // (at most every 30s, results cached like everywhere else).
+  let atkLogStats = {};
+  let atkLogStatsAt = 0;
+  let atkLogStatsVer = 0;
+  let atkLogStatsBusy = false;
+  function atkLogFetchStats(ids) {
+    if (!featureOn('ffStats') || atkLogStatsBusy) return;
+    const need = [...new Set(ids.map(String))].filter((id) => id && id !== '0' && !(id in atkLogStats)).slice(0, 100);
+    if (!need.length || Date.now() - atkLogStatsAt < 30000) return;
+    atkLogStatsBusy = true;
+    atkLogStatsAt = Date.now();
+    Promise.resolve(fetchFFStats(need)).then((r) => {
+      if (!r || r.error || r.skipped) return;
+      need.forEach((id) => { atkLogStats[id] = (r.map && r.map[id]) || null; });
+      atkLogStatsVer++;
+      try { atkLogSig = ''; renderAtkLog(); } catch (e) { /* ignore */ }
+    }).catch(() => {}).finally(() => { atkLogStatsBusy = false; });
+  }
+
   function renderAtkLog__raw() {
     if (!panel || !wideLogOn()) return;
     const col = panel.querySelector('#tws-atklog');
@@ -8770,17 +8792,31 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
       && !loadAtkLog().some((y) => String(y.aF) === ownId && String(y.dId) === String(x.aId)
         && y.e >= x.e && isHospHit({ result: y.r }));
     const retalIds = list.filter(isRetal).map((x) => x.id).join(',');
-    const sig = [atkLogFilter, list.length, list[0] ? list[0].id : '', atkLogSource, atkLogError, retalIds, ownId, enemyId].join('|');
+    const sig = [atkLogFilter, list.length, list[0] ? list[0].id : '', atkLogSource, atkLogError, retalIds, ownId, enemyId, atkLogStatsVer].join('|');
     if (sig === atkLogSig && col.firstChild) return;
     atkLogSig = sig;
 
     const oldList = col.querySelector('.tws-log-list');
     const oldScroll = oldList ? oldList.scrollTop : 0;
+    const known = {};
+    enemyMembers.forEach((m) => { if (m.ff) known[m.id] = m.ff; });
+    homeMembers.forEach((m) => { if (m.ff) known[m.id] = m.ff; });
+    const statsOn = featureOn('ffStats');
+    if (statsOn) {
+      const ids = [];
+      list.forEach((x) => { [x.aId, x.dId].forEach((i) => { if (i && !known[i]) ids.push(i); }); });
+      atkLogFetchStats(ids);
+    }
+    const statOf = (id) => {
+      if (!statsOn || !id) return '';
+      const ff = known[id] || atkLogStats[String(id)];
+      return (ff && ff.bs_estimate_human) ? ` <small style="opacity:0.7">${escHtml(ff.bs_estimate_human)}</small>` : '';
+    };
     const who = (id, n, fac) => {
       const cls = String(fac) === ownId ? 'tws-log-own' : (enemyId && String(fac) === enemyId) ? 'tws-log-enemy' : 'tws-log-other';
       if (!id) return `<span class="tws-log-other">Someone</span>`;
       const label = escHtml(n || names[id] || `[${id}]`);
-      return `<a class="${cls}" target="_blank" href="https://www.torn.com/profiles.php?XID=${id}">${label}</a>`;
+      return `<a class="${cls}" target="_blank" href="https://www.torn.com/profiles.php?XID=${id}">${label}</a>${statOf(id)}`;
     };
     const rows = list.map((x) => {
       const dir = String(x.aF) === ownId ? 'out' : String(x.dF) === ownId ? 'in' : 'other';
