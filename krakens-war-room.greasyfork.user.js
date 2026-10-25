@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Krakens War Room 🐙
 // @namespace    jay-torn-war-script
-// @version      1.99.39
+// @version      1.99.40
 // @description  Ranked-war companion for Torn: live enemy roster with hospital timers, chain timers & alerts, attack/retal links, targets, attacks log, battle-stat estimates and a PC wide mode. Works in Tampermonkey and Torn PDA. 2-hour free trial, then 1 Xanax = 7 days.
 // @author       -TheKraken- [3616083]
 // @copyright    2026, -TheKraken- [3616083] - All rights reserved
@@ -584,7 +584,7 @@ const __twsOuter = (() => {
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.39';
+  const SCRIPT_VERSION = '1.99.40';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -2000,12 +2000,34 @@ const __twsOuter = (() => {
       && !loadAtkLog().some((y) => String(y.aF) === ownId && String(y.dId) === String(x.aId)
         && y.e >= x.e && isHospHit({ result: y.r }));
   }
+
+  // Battle-stat estimates for every name in the Attacks log. Members of the
+  // war rosters already have theirs; anyone else is looked up in batches
+  // (at most every 30s, results cached like everywhere else).
+  let atkLogStats = {};
+  let atkLogStatsAt = 0;
+  let atkLogStatsVer = 0;
+  let atkLogStatsBusy = false;
+  function atkLogFetchStats(ids) {
+    if (!featureOn('ffStats') || atkLogStatsBusy) return;
+    const need = [...new Set(ids.map(String))].filter((id) => id && id !== '0' && !(id in atkLogStats)).slice(0, 100);
+    if (!need.length || Date.now() - atkLogStatsAt < 30000) return;
+    atkLogStatsBusy = true;
+    atkLogStatsAt = Date.now();
+    Promise.resolve(fetchFFStats(need)).then((r) => {
+      if (!r || r.error || r.skipped) return;
+      need.forEach((id) => { atkLogStats[id] = (r.map && r.map[id]) || null; });
+      atkLogStatsVer++;
+      try { atkLogSig = ''; atkLogChanged(); } catch (e) { /* ignore */ }
+    }).catch(() => {}).finally(() => { atkLogStatsBusy = false; });
+  }
+
   function atkLogSignature() {
     const ownId = String(getOwnFactionId() || '');
     const nowS = Date.now() / 1000;
     const list = atkLogList();
     const retalIds = list.filter((x) => atkLogIsRetal(x, ownId, nowS)).map((x) => x.id).join(',');
-    return [atkLogFilter, list.length, list[0] ? list[0].id : '', atkLogSource, atkLogError, retalIds, ownId, enemyFactionId || ''].join('|');
+    return [atkLogFilter, list.length, list[0] ? list[0].id : '', atkLogSource, atkLogError, retalIds, ownId, enemyFactionId || '', atkLogStatsVer].join('|');
   }
 
   // The Attacks tab's content (goes where the roster rows normally are).
@@ -2023,11 +2045,27 @@ const __twsOuter = (() => {
     enemyMembers.forEach((m) => { names[m.id] = m.name; });
     homeMembers.forEach((m) => { names[m.id] = m.name; });
     const list = atkLogList();
+    const known = {};
+    enemyMembers.forEach((m) => { if (m.ff) known[m.id] = m.ff; });
+    homeMembers.forEach((m) => { if (m.ff) known[m.id] = m.ff; });
+    const statsOn = featureOn('ffStats');
+    if (statsOn) {
+      const ids = [];
+      list.forEach((x) => { [x.aId, x.dId].forEach((i) => { if (i && !known[i]) ids.push(i); }); });
+      atkLogFetchStats(ids);
+    }
+    const statOf = (id) => {
+      if (!statsOn || !id) return '';
+      const ff = known[id] || atkLogStats[String(id)];
+      if (!ff) return '';
+      const col = ffColour(fairFightOf(ff));
+      return ` <small class="tws-est tws-log-est"${col ? ` style="color:${col};opacity:1;"` : ''}>${estHtml(ff)}</small>`;
+    };
     const who = (id, n, fac) => {
       const cls = String(fac) === ownId ? 'tws-log-own' : (enemyId && String(fac) === enemyId) ? 'tws-log-enemy' : 'tws-log-other';
       if (!id) return `<span class="tws-log-other">Someone</span>`;
       const label = escHtml(n || names[id] || `[${id}]`);
-      return `<a class="${cls}" target="_blank" href="https://www.torn.com/profiles.php?XID=${id}">${label}</a>`;
+      return `<a class="${cls}" target="_blank" href="https://www.torn.com/profiles.php?XID=${id}">${label}</a>${statOf(id)}`;
     };
     const rows = list.map((x) => {
       const dir = String(x.aF) === ownId ? 'out' : String(x.dF) === ownId ? 'in' : 'other';
