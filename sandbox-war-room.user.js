@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Sandbox War Room 🧪
 // @namespace    jay-torn-war-script-sandbox
-// @version      1.99.41
+// @version      1.99.42
 // @downloadURL  https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @updateURL    https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @description  [SANDBOX - test build, not for general use] Enemy hospital timers, quick attack links, and a chain timeout alert overlay for Torn faction war pages. Works in Tampermonkey (Firefox) and Torn PDA.
@@ -582,7 +582,7 @@ const __twsOuter = (() => {
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.41';
+  const SCRIPT_VERSION = '1.99.42';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -788,7 +788,7 @@ const __twsOuter = (() => {
     { key: 'keepEnemyAfterWar', group: 'Chain & war', label: 'Keep the last enemy\u2019s roster showing after a war ends', hint: 'The Enemy tab stays until the next ranked war is matched.' },
     { key: 'retalDetect', group: 'Chain & war', label: 'Retal button: shows "Retal" instead of "ATK" during a 5-minute retaliation window', hint: 'Needs a successful enemy hit on your faction within the last 5 minutes. One extra API call every 20s during a war.' },
     { key: 'retalShared', group: 'Chain & war', label: '\u26a1 Shared Retal (Kraken server)', hint: 'Lets Retal work for members without faction API access, using a key a faction member has shared. No extra API calls from you; falls back to your own key if your faction has no shared key.', requires: 'retalDetect' },
-    { key: 'chainShare', group: 'Chain & war', label: '\u23f1\ufe0f Share your chain timer with Chain Watch (Glory factions only)', hint: 'While your faction is chaining, sends the chain count and timer shown on your own Torn page to Chain Watch, so its timer stays right when Torn\u2019s API runs late. Only sent while Chain Watch has it switched on. Nothing else is sent, and it costs no API calls.' },
+    { key: 'chainShare', group: 'Chain & war', label: '\u23f1\ufe0f Share your chain timer with Chain Watch (Glory factions only)', hint: 'While your faction is chaining, sends the chain count and timer shown on your own Torn page to Chain Watch every 2 minutes, so it can tell when Torn\u2019s API is running late. If it is, it sends on every hit until the API catches up, and Chain Watch\u2019s timer follows your page. Nothing else is sent, and it costs no API calls.' },
     { key: 'atkLog', group: 'Chain & war', label: '\ud83d\udcdc Attacks tab: your faction\u2019s attacks as a live log', hint: 'Outgoing and incoming hits, newest first, with Retal and Outside Hit badges. Uses the same data as Retal: free with a shared Retal key, otherwise one call every 20s from your key while the tab is open (needs faction API access).' },
 
     // --- Kraken Intel (integrated) ---
@@ -1271,14 +1271,14 @@ const __twsOuter = (() => {
   // ---------------------------------------------------------------------
   // CHAIN WATCH: share the on-page chain clock (Glory factions only)
   // Torn's API can run minutes behind the game. The chain bar on the page
-  // doesn't, so while Chain Watch asks for it, the count and seconds left
-  // shown on this page are sent to it: on every new hit, and at most every
-  // 30s otherwise. Only while this tab is in view. When Chain Watch has it
-  // switched off, it checks again after 10 minutes. No Torn API calls.
+  // doesn't, so the count and seconds left shown on this page are sent to
+  // Chain Watch every 2 minutes. If Chain Watch finds the API behind (or an
+  // admin forces it on) it answers fast:true, and this sends on every new hit
+  // and at least every 30s. Only while this tab is in view. No Torn API calls.
   // ---------------------------------------------------------------------
   const CW_SEEN_URL = 'https://dashing-fish-54.eu-west-1.convex.site/chain/seen';
   const CW_FACTIONS = ['16057', '49431'];
-  const cwShare = { lastCount: 0, lastAt: 0, offUntil: 0, busy: false };
+  const cwShare = { lastCount: 0, lastAt: 0, offUntil: 0, busy: false, fast: false };
   function cwShareTick() {
     if (!featureOn('chainShare') || cwShare.busy || document.hidden) return;
     const f = String(getOwnFactionId() || '');
@@ -1287,10 +1287,10 @@ const __twsOuter = (() => {
     if (now < cwShare.offUntil) return;
     const secs = readPageChainSecs(), count = readPageChainCount();
     if (secs === null || !count || count < 10) return;
-    if (count === cwShare.lastCount && now - cwShare.lastAt < 30000) return;
+    if (cwShare.fast ? (count === cwShare.lastCount && now - cwShare.lastAt < 30000) : now - cwShare.lastAt < 120000) return;
     cwShare.busy = true; cwShare.lastCount = count; cwShare.lastAt = now;
     serverGet(`${CW_SEEN_URL}?f=${f}&c=${count}&s=${secs}`)
-      .then((d) => { if (d && d.on === false) cwShare.offUntil = Date.now() + 10 * 60 * 1000; })
+      .then((d) => { cwShare.fast = !!(d && d.fast); if (d && d.on === false) cwShare.offUntil = Date.now() + 10 * 60 * 1000; })
       .catch(() => { cwShare.offUntil = Date.now() + 60 * 1000; })
       .then(() => { cwShare.busy = false; });
   }
