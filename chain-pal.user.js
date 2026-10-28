@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Chain Pal 🔗
 // @namespace    jay-chain-pal
-// @version      1.0.4
+// @version      1.0.5
 // @description  Big chain timer, chain alerts and a one-click target finder in Torn's sidebar (PC). By -TheKraken- [3616083].
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/*
@@ -89,7 +89,7 @@
     var t = a.currentTime + 0.02 + SND_OFF, o = a.createOscillator(), g = a.createGain();
     o.type = "sine"; o.frequency.setValueAtTime(880, t);
     o.connect(g); g.connect(sndDest(a)); env(a, g, t, 1.6, 0.45); o.start(t); o.stop(t + 1.65);
-    try { navigator.vibrate && navigator.vibrate(800) } catch(e){}
+    try { cpVib(800) } catch(e){}
   }
   function siren(){
     var a = audio(); if (!a) return;
@@ -98,15 +98,15 @@
     for (var i = 0; i < cycles; i++){ o.frequency.linearRampToValueAtTime(1350, t + (2*i+1)*half); o.frequency.linearRampToValueAtTime(650, t + (2*i+2)*half) }
     var lp = a.createBiquadFilter(); lp.type = "lowpass"; lp.frequency.value = 2600;
     o.connect(lp); lp.connect(g); g.connect(sndDest(a)); env(a, g, t, cycles*2*half, 0.35); o.start(t); o.stop(t + cycles*2*half + 0.05);
-    try { navigator.vibrate && navigator.vibrate([300,150,300,150,300,150,300]) } catch(e){}
+    try { cpVib([300,150,300,150,300,150,300]) } catch(e){}
   }
   // more alert sounds (all made in the browser, no downloads)
   function tone(a, t, f, dur, type, vol){ var o = a.createOscillator(), g = a.createGain(); o.type = type || "sine"; o.frequency.setValueAtTime(f, t); o.connect(g); g.connect(sndDest(a)); env(a, g, t, dur, vol || 0.4); o.start(t); o.stop(t + dur + 0.02) }
-  function sndDouble(){ var a = audio(); if (!a) return; var t = a.currentTime + 0.02 + SND_OFF; tone(a, t, 990, 0.22); tone(a, t + 0.32, 990, 0.22); try { navigator.vibrate && navigator.vibrate([200,100,200]) } catch(e){} }
-  function sndRapid(){ var a = audio(); if (!a) return; var t = a.currentTime + 0.02 + SND_OFF; for (var i = 0; i < 8; i++) tone(a, t + i * 0.18, 1250, 0.1, "square", 0.25); try { navigator.vibrate && navigator.vibrate([100,80,100,80,100,80,100]) } catch(e){} }
-  function sndChime(){ var a = audio(); if (!a) return; var t = a.currentTime + 0.02 + SND_OFF; tone(a, t, 1046, 0.5); tone(a, t + 0.35, 784, 0.7); try { navigator.vibrate && navigator.vibrate(300) } catch(e){} }
-  function sndHorn(){ var a = audio(); if (!a) return; var t = a.currentTime + 0.02 + SND_OFF; tone(a, t, 220, 1.1, "sawtooth", 0.3); tone(a, t, 277, 1.1, "sawtooth", 0.2); try { navigator.vibrate && navigator.vibrate(1000) } catch(e){} }
-  function sndBell(){ var a = audio(); if (!a) return; var t = a.currentTime + 0.02 + SND_OFF; for (var i = 0; i < 3; i++){ tone(a, t + i * 0.45, 1568, 0.4, "triangle", 0.45); tone(a, t + i * 0.45, 2349, 0.3, "sine", 0.15) } try { navigator.vibrate && navigator.vibrate([150,300,150,300,150]) } catch(e){} }
+  function sndDouble(){ var a = audio(); if (!a) return; var t = a.currentTime + 0.02 + SND_OFF; tone(a, t, 990, 0.22); tone(a, t + 0.32, 990, 0.22); try { cpVib([200,100,200]) } catch(e){} }
+  function sndRapid(){ var a = audio(); if (!a) return; var t = a.currentTime + 0.02 + SND_OFF; for (var i = 0; i < 8; i++) tone(a, t + i * 0.18, 1250, 0.1, "square", 0.25); try { cpVib([100,80,100,80,100,80,100]) } catch(e){} }
+  function sndChime(){ var a = audio(); if (!a) return; var t = a.currentTime + 0.02 + SND_OFF; tone(a, t, 1046, 0.5); tone(a, t + 0.35, 784, 0.7); try { cpVib(300) } catch(e){} }
+  function sndHorn(){ var a = audio(); if (!a) return; var t = a.currentTime + 0.02 + SND_OFF; tone(a, t, 220, 1.1, "sawtooth", 0.3); tone(a, t, 277, 1.1, "sawtooth", 0.2); try { cpVib(1000) } catch(e){} }
+  function sndBell(){ var a = audio(); if (!a) return; var t = a.currentTime + 0.02 + SND_OFF; for (var i = 0; i < 3; i++){ tone(a, t + i * 0.45, 1568, 0.4, "triangle", 0.45); tone(a, t + i * 0.45, 2349, 0.3, "sine", 0.15) } try { cpVib([150,300,150,300,150]) } catch(e){} }
   var SOUNDS = { long: ["Long beep", beepLong], siren: ["Siren", siren], double: ["Double beep", sndDouble], rapid: ["Rapid beeps", sndRapid], chime: ["Chime", sndChime], horn: ["Horn", sndHorn], bell: ["Bell", sndBell] };
   var AL_N = 5; // alerts each person can set
   var AL_MAX = 210; // earliest alert: 3:30 (the timer checks every 5s from then on)
@@ -818,7 +818,7 @@
   // ---------------------------------------------------------------------
   // Chain Pal: sidebar widget + settings panel
   // ---------------------------------------------------------------------
-  var CP_VERSION = "1.0.4";
+  var CP_VERSION = "1.0.5";
   var SIDE_HTML = '<div id="cpalSide" class="cpal cp-side">'
     + '<div class="cp-tm" id="cpTm"><div class="cp-ch"><span id="cpCount">Chain</span><button id="cpSnd" class="cp-snd" title="Alert sound on/off">🔕</button></div>'
     + '<div class="cp-time" id="cpTime">--:--</div><div class="cp-src"><span id="cpSrc"></span><span id="cpStale" class="hide">\u26a0 Torn\u2019s API is behind \u2013 use the in-game timer</span></div></div>'
@@ -908,17 +908,20 @@
   }
 
   // ---- alerts, booked ahead on the audio clock (keeps time in background tabs) ----
-  var SND_OFF = 0, SND_BUS = null;
+  var SND_OFF = 0, SND_BUS = null, SND_VIB = null;
   function sndDest(a){ return SND_BUS || a.destination }
+  // vibration: right away when a sound plays now (Test, previews); a booked alert keeps it for its own moment
+  function cpVib(p){ if (SND_OFF > 0.05){ SND_VIB = p; return } try { navigator.vibrate && navigator.vibrate(p) } catch(e){} }
   function playAt(k, delay){ // a sound starting `delay` seconds from now, on its own bus so it can be cancelled
     var a = audio(); if (!a) return null;
     var bus = a.createGain(); bus.connect(a.destination);
-    SND_BUS = bus; SND_OFF = Math.max(0, delay);
+    SND_BUS = bus; SND_OFF = Math.max(0, delay); SND_VIB = null;
     try { (SOUNDS[k] || SOUNDS.long)[1]() } catch(e){}
-    SND_BUS = null; SND_OFF = 0;
+    if (SND_VIB != null){ var vp = SND_VIB; bus.vibT = setTimeout(function(){ try { navigator.vibrate && navigator.vibrate(vp) } catch(e){} }, SND_OFF * 1000) } // buzz with the alert, not now
+    SND_BUS = null; SND_OFF = 0; SND_VIB = null;
     return bus;
   }
-  function cancelBus(b){ try { b.disconnect() } catch(e){} }
+  function cancelBus(b){ if (!b) return; try { clearTimeout(b.vibT) } catch(e){} try { b.disconnect() } catch(e){} } // a hit: no sound and no buzz
   var CK = { exp: null, count: null, booked: [], armed: null, seenAt: 0 };
   function bookAlerts(left){
     var AL = alerts(), a = AC && AC.state === "running" ? AC : null;
