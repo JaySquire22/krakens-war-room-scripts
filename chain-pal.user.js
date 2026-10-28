@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Chain Pal 🔗
 // @namespace    jay-chain-pal
-// @version      1.0.6
+// @version      1.0.7
 // @description  Big chain timer, chain alerts and a one-click target finder in Torn's sidebar (PC). By -TheKraken- [3616083].
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/*
@@ -581,10 +581,11 @@
   // ---- players our faction beat recently (from the server, refreshed every 10 min with the finder lookup) ----
   // offered again once the "don't repeat" time has passed (15 min if that's off); status is checked as usual
   function tfEasyMatches(type){
-    var c = tfCfg(), tt = c[type], L = (TF.easy && TF.easy.list) || [];
+    var c = tfCfg(), tt = c[type], L0 = (TF.easy && TF.easy.list) || [], seenE = {}, L = [];
+    L0.concat(TF.old || []).forEach(function(x){ if (x && x.p && !seenE[x.p]){ seenE[x.p] = 1; L.push(x) } }); // the last 6 hours + a random batch from the whole event
     var gap = (Number(c.repeatMin) || 15) * 60, nowS = Date.now() / 1000;
     var wi = TF.warIds || {};
-    var cand = L.filter(function(x){ return x.p && nowS - x.t >= gap && !(c.nofac && x.f) && !wi[x.f] }).slice(-60);
+    var cand = L.filter(function(x){ return x.p && nowS - x.t >= gap && !(c.nofac && x.f) && !wi[x.f] }).slice(-120);
     if (!cand.length) return Promise.resolve([]);
     return tfFairFight(cand.map(function(x){ return x.p })).then(function(ffs){
       return cand.map(function(x, i){ return { player_id: x.p, name: x.n, level: 0, fair_fight: ffs[i].ff, bs_estimate_human: ffs[i].est, chk: true, easy: true } })
@@ -597,7 +598,7 @@
   function tfFacMatches(type){
     var c = tfCfg(), tt = c[type];
     if (c.nofac) return Promise.resolve([]);
-    var L = (TF.easy && TF.easy.list) || [], cnt = {}, now = Date.now();
+    var L = ((TF.easy && TF.easy.list) || []).concat(TF.old || []), cnt = {}, now = Date.now();
     var wi = TF.warIds || {};
     L.forEach(function(x){ if (x.f && OUR_FACS.indexOf(x.f) < 0 && !wi[x.f]) cnt[x.f] = (cnt[x.f] || 0) + 1 });
     var facs = Object.keys(cnt).map(Number).filter(function(f){ var x = TF.fac[f]; return !x || now - x.at > 120000 })
@@ -672,8 +673,8 @@
     });
     // one lookup: held by someone else, just hospitalised by us, and the coming-out-soon list
     var soonList = [];
-    var cp = api({ op: "finderState", cid: cid(), pin: "", easyAt: TF.easy ? TF.easy.at : 0 }).then(function(j){
-      soonList = j.soon || [];
+    var cp = api({ op: "finderState", cid: cid(), pin: "", easyAt: TF.easy ? TF.easy.at : 0, old: Math.random() }).then(function(j){
+      soonList = j.soon || []; TF.old = j.old || [];
       if (j.easy){ TF.easy = j.easy; try { store("cw_tfeasy", JSON.stringify(j.easy)) } catch(e){} }
       return (j.held || []).concat(j.hosp || []);
     }).catch(function(){ return [] });
@@ -828,7 +829,7 @@
   // ---------------------------------------------------------------------
   // Chain Pal: sidebar widget + settings panel
   // ---------------------------------------------------------------------
-  var CP_VERSION = "1.0.6";
+  var CP_VERSION = "1.0.7";
   var SIDE_HTML = '<div id="cpalSide" class="cpal cp-side">'
     + '<div class="cp-tm" id="cpTm"><div class="cp-ch"><span id="cpCount">Chain</span><button id="cpSnd" class="cp-snd" title="Alert sound on/off">🔕</button></div>'
     + '<div class="cp-time" id="cpTime">--:--</div><div class="cp-src"><span id="cpSrc"></span><span id="cpStale" class="hide">\u26a0 Torn\u2019s API is behind \u2013 use the in-game timer</span></div></div>'
