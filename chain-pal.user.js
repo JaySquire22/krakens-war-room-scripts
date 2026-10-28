@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Chain Pal 🔗
 // @namespace    jay-chain-pal
-// @version      1.0.5
+// @version      1.0.6
 // @description  Big chain timer, chain alerts and a one-click target finder in Torn's sidebar (PC). By -TheKraken- [3616083].
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/*
@@ -290,15 +290,25 @@
     var sig = [type, t.minff, t.maxff, t.minlvl, t.maxlvl, c.inactive, days, c.nofac].join("|");
     var hit = TF.cache[type];
     if (hit && hit.sig === sig && Date.now() - hit.at < 60000) return Promise.resolve(hit.list);
-    var q = "key=" + encodeURIComponent(k) + "&minff=" + t.minff + "&maxff=" + t.maxff + "&minlevel=" + t.minlvl + "&maxlevel=" + t.maxlvl
-      + "&inactiveonly=" + (c.inactive && days >= 14 ? 1 : 0) + "&factionless=" + (c.nofac ? 1 : 0) + "&limit=50";
-    return fetch("https://ffscouter.com/api/v1/get-targets?" + q).then(function(r){ return r.json() }).then(function(d){
-      if (d && d.error){
-        var e = String(d.error);
-        if (d.code === 6 || /key/i.test(e)) e = "FF Scouter doesn't recognise this key. Sign up at ffscouter.com with it first (one-off), then try again.";
-        throw new Error(e);
-      }
-      var list = (d && d.targets) || [];
+    // FF Scouter returns up to 50 per ask: ask once per level band (up to 4 bands across your range) for up to 200 different people
+    var lo = Math.max(1, Math.round(t.minlvl)), hi = Math.max(lo, Math.round(t.maxlvl)), nb = Math.min(4, Math.max(1, Math.ceil((hi - lo + 1) / 10))), bands = [];
+    for (var bi = 0; bi < nb; bi++){ var ba = lo + Math.floor(bi * (hi - lo + 1) / nb), bb = lo + Math.floor((bi + 1) * (hi - lo + 1) / nb) - 1; if (bb >= ba) bands.push([ba, bb]) }
+    var ask = function(band){
+      var q = "key=" + encodeURIComponent(k) + "&minff=" + t.minff + "&maxff=" + t.maxff + "&minlevel=" + band[0] + "&maxlevel=" + band[1]
+        + "&inactiveonly=" + (c.inactive && days >= 14 ? 1 : 0) + "&factionless=" + (c.nofac ? 1 : 0) + "&limit=50";
+      return fetch("https://ffscouter.com/api/v1/get-targets?" + q).then(function(r){ return r.json() }).then(function(d){
+        if (d && d.error){
+          var e = String(d.error);
+          if (d.code === 6 || /key/i.test(e)) e = "FF Scouter doesn't recognise this key. Sign up at ffscouter.com with it first (one-off), then try again.";
+          throw new Error(e);
+        }
+        return (d && d.targets) || [];
+      });
+    };
+    return Promise.all(bands.map(function(band){ return ask(band).then(function(l){ return { l: l } }, function(e){ return { e: e } }) })).then(function(rs){
+      var ok = rs.filter(function(x){ return x.l }); if (!ok.length) throw rs[0].e; // every band failed: show why
+      var seen = {}, list = [];
+      ok.forEach(function(x){ x.l.forEach(function(p){ if (p && p.player_id && !seen[p.player_id]){ seen[p.player_id] = 1; list.push(p) } }) });
       if (c.inactive && days !== 14){ // FF Scouter only knows "14+ days": any other choice is filtered on last action here
         var cut = Date.now() / 1000 - days * 86400;
         list = list.filter(function(x){ var la = Number(x.last_action); return la > 0 ? la <= cut : days < 14 });
@@ -459,7 +469,7 @@
     p.then(function(list){
       var n = list.length;
       $(id).className = "tf-cnt" + (n === 0 ? " none" : n < 10 ? " low" : "");
-      $(id).innerHTML = "<b>" + n + (n === 50 ? "+" : "") + "</b> " + (n === 0 ? "targets. Widen the range" : n < 10 ? "targets (low)" : "targets available");
+      $(id).innerHTML = "<b>" + n + (n > 0 && n % 50 === 0 ? "+" : "") + "</b> " + (n === 0 ? "targets. Widen the range" : n < 10 ? "targets (low)" : "targets available");
     }).catch(function(e){ $(id).className = "tf-cnt none"; $(id).innerHTML = "<b>!</b> " + esc(e.message) });
   }
   var tfDeb = null;
@@ -818,7 +828,7 @@
   // ---------------------------------------------------------------------
   // Chain Pal: sidebar widget + settings panel
   // ---------------------------------------------------------------------
-  var CP_VERSION = "1.0.5";
+  var CP_VERSION = "1.0.6";
   var SIDE_HTML = '<div id="cpalSide" class="cpal cp-side">'
     + '<div class="cp-tm" id="cpTm"><div class="cp-ch"><span id="cpCount">Chain</span><button id="cpSnd" class="cp-snd" title="Alert sound on/off">🔕</button></div>'
     + '<div class="cp-time" id="cpTime">--:--</div><div class="cp-src"><span id="cpSrc"></span><span id="cpStale" class="hide">\u26a0 Torn\u2019s API is behind \u2013 use the in-game timer</span></div></div>'
