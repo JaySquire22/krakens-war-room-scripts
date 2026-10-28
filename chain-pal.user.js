@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Chain Pal 🔗
 // @namespace    jay-chain-pal
-// @version      1.0.7
+// @version      1.0.8
 // @description  Big chain timer, chain alerts and a one-click target finder in Torn's sidebar (PC). By -TheKraken- [3616083].
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/*
@@ -308,7 +308,7 @@
     return Promise.all(bands.map(function(band){ return ask(band).then(function(l){ return { l: l } }, function(e){ return { e: e } }) })).then(function(rs){
       var ok = rs.filter(function(x){ return x.l }); if (!ok.length) throw rs[0].e; // every band failed: show why
       var seen = {}, list = [];
-      ok.forEach(function(x){ x.l.forEach(function(p){ if (p && p.player_id && !seen[p.player_id]){ seen[p.player_id] = 1; list.push(p) } }) });
+      ok.forEach(function(x){ x.l.forEach(function(p){ if (p && p.player_id && !seen[p.player_id]){ seen[p.player_id] = 1; list.push(p); tdbAdd({ p: Number(p.player_id), n: p.name, l: Number(p.level) || 0, la: Number(p.last_action) || 0, e: Number(p.bs_estimate) || 0 }); tdbCal(Number(p.fair_fight), Number(p.bs_estimate) || 0) } }) });
       if (c.inactive && days !== 14){ // FF Scouter only knows "14+ days": any other choice is filtered on last action here
         var cut = Date.now() / 1000 - days * 86400;
         list = list.filter(function(x){ var la = Number(x.last_action); return la > 0 ? la <= cut : days < 14 });
@@ -323,6 +323,7 @@
         if (d && d.error) return { ok: false, err: d.error.error || "Torn API error" };
         var st = (d && d.profile && d.profile.status) || {};
         var pr = (d && d.profile) || {}, la = pr.last_action || {};
+        if (pr.id || id) tdbAdd({ p: Number(pr.id) || Number(id), n: pr.name, l: Number(pr.level) || 0, f: Number(pr.faction_id) || 0, la: Number(la.timestamp) || 0 });
         return { ok: true, state: st.state || "", desc: st.description || "", until: Number(st.until) || 0, online: String(la.status || ""),
           name: pr.name || "", level: Number(pr.level) || 0, fac: Number(pr.faction_id) || 0, laTs: Number(la.timestamp) || 0 };
       }).catch(function(){ return { ok: false, err: "Couldn't reach Torn" } });
@@ -398,7 +399,8 @@
           if (d && d.error && !Array.isArray(d)) throw new Error(String(d.error));
           var rows = Array.isArray(d) ? d : (d && (d.data || d.targets || d.results)) || [];
           ch.forEach(function(id){ TF.ffs[id] = { at: now, ff: null } });
-          rows.forEach(function(r){ var id = Number(r.player_id || r.id); if (id) TF.ffs[id] = { at: now, ff: r.fair_fight == null ? null : Number(r.fair_fight), est: r.bs_estimate_human || "" } });
+          rows.forEach(function(r){ var id = Number(r.player_id || r.id); if (!id) return; var ff = r.fair_fight == null ? null : Number(r.fair_fight), bs = Number(r.bs_estimate) || 0;
+            TF.ffs[id] = { at: now, ff: ff, est: r.bs_estimate_human || "", bs: bs }; if (bs) tdbAdd({ p: id, e: bs }); tdbCal(ff, bs) });
         });
     })).then(function(){ return ids.map(function(id){ return TF.ffs[id] || { ff: null } }) });
   }
@@ -578,6 +580,43 @@
     if (p && Date.now() - p.at < 60000) return p.list;
     return tfRandomMake(type);
   }
+  // ---- shared target database: what every finder learns about players goes into it, and searches draw from it ----
+  // Fair fight is personal: your own stats are worked out from FF Scouter's numbers (fair fight = 1 + 8/3 x their stats / yours),
+  // then the database is asked for players whose stats estimate puts them in your fair fight range.
+  TF.contrib = {}; TF.contribAt = Date.now(); TF.sent = {}; TF.cal = [];
+  try { var mb = JSON.parse(store("cw_mybs") || "null"); if (mb && mb.v > 0 && Date.now() - mb.at < 7 * 86400000) TF.myBS = mb.v } catch(e){}
+  function tdbAdd(o){
+    if (!o || !o.p) return;
+    var x = TF.contrib[o.p] || (TF.contrib[o.p] = { p: o.p });
+    ["n", "l", "la", "e"].forEach(function(k){ if (o[k]) x[k] = o[k] });
+    if (o.f !== undefined && o.f !== null) x.f = o.f;
+    if (Object.keys(TF.contrib).length >= 80) tdbFlush(true);
+  }
+  function tdbFlush(force){
+    var ids = Object.keys(TF.contrib); if (!ids.length) return;
+    if (!force && Date.now() - TF.contribAt < 90000) return;
+    var rows = [];
+    ids.forEach(function(id){ var x = TF.contrib[id], sig = JSON.stringify(x); if (TF.sent[id] !== sig){ TF.sent[id] = sig; rows.push(x) } });
+    TF.contrib = {}; TF.contribAt = Date.now();
+    for (var i = 0; i < rows.length; i += 150) api({ op: "tgtAdd", rows: rows.slice(i, i + 150), pin: "" }).catch(function(){});
+  }
+  function tdbCal(ff, bs){
+    if (!(ff > 1.05 && ff < 2.95 && bs > 0)) return;
+    TF.cal.push(bs * 8 / (3 * (ff - 1))); if (TF.cal.length > 80) TF.cal.shift();
+    if (TF.cal.length >= 5){ var a = TF.cal.slice().sort(function(x, y){ return x - y }); TF.myBS = a[Math.floor(a.length / 2)]; try { store("cw_mybs", JSON.stringify({ v: Math.round(TF.myBS), at: Date.now() })) } catch(e){} }
+  }
+  function tdbAsk(type){ // what to ask the database for (needs your stats worked out first)
+    var c = tfCfg(), t = c[type]; if (!(TF.myBS > 0)) return undefined;
+    return { lo: Math.round(TF.myBS * (t.minff - 1) * 3 / 8 * 0.9), hi: Math.round(TF.myBS * (t.maxff - 1) * 3 / 8 * 1.1), minL: t.minlvl, maxL: t.maxlvl, nofac: !!c.nofac, inact: c.inactive ? (Number(c.inactDays) || 14) * 86400 : 0, seed: Math.random() };
+  }
+  function tfDbMatches(type){
+    var c = tfCfg(), tt = c[type], wi = TF.warIds || {}, L = (TF.dbList || []).filter(function(x){ return x.p && !wi[x.f] && OUR_FACS.indexOf(x.f) < 0 && (!x.l || (x.l >= tt.minlvl && x.l <= tt.maxlvl)) });
+    if (!L.length) return Promise.resolve([]);
+    return tfFairFight(L.map(function(x){ return x.p })).then(function(ffs){
+      return L.map(function(x, i){ return { player_id: x.p, name: x.n || ("Player " + x.p), level: x.l || 0, fair_fight: ffs[i].ff, bs_estimate_human: ffs[i].est, chk: true, tdb: true } })
+        .filter(function(x){ return x.fair_fight != null && x.fair_fight >= tt.minff && x.fair_fight <= tt.maxff });
+    });
+  }
   // ---- players our faction beat recently (from the server, refreshed every 10 min with the finder lookup) ----
   // offered again once the "don't repeat" time has passed (15 min if that's off); status is checked as usual
   function tfEasyMatches(type){
@@ -611,7 +650,7 @@
         .then(function(r){ return r.json() }).then(function(d){
           if (!d || d.error) return [];
           var ms = Array.isArray(d.members) ? d.members : Object.keys(d.members || {}).map(function(k){ var m = d.members[k]; if (m && !m.id) m.id = Number(k); return m });
-          return ms.map(function(m){ return { id: Number(m.id) || 0, name: String(m.name || ""), level: Number(m.level) || 0, st: m.status || {}, la: m.last_action || {} } });
+          return ms.map(function(m){ var o = { id: Number(m.id) || 0, name: String(m.name || ""), level: Number(m.level) || 0, st: m.status || {}, la: m.last_action || {} }; if (o.id) tdbAdd({ p: o.id, n: o.name, l: o.level, f: fid, la: Number(o.la.timestamp) || 0 }); return o });
         }).catch(function(){ return [] });
     })).then(function(groups){
       var all = [].concat.apply([], groups), at = Date.now(), nowS = at / 1000, idays = Number(c.inactDays) || 14;
@@ -673,15 +712,15 @@
     });
     // one lookup: held by someone else, just hospitalised by us, and the coming-out-soon list
     var soonList = [];
-    var cp = api({ op: "finderState", cid: cid(), pin: "", easyAt: TF.easy ? TF.easy.at : 0, old: Math.random() }).then(function(j){
-      soonList = j.soon || []; TF.old = j.old || [];
+    var cp = api({ op: "finderState", cid: cid(), pin: "", easyAt: TF.easy ? TF.easy.at : 0, old: Math.random(), db: tdbAsk(type) }).then(function(j){
+      soonList = j.soon || []; TF.old = j.old || []; TF.dbList = j.db || [];
       if (j.easy){ TF.easy = j.easy; try { store("cw_tfeasy", JSON.stringify(j.easy)) } catch(e){} }
       return (j.held || []).concat(j.hosp || []);
     }).catch(function(){ return [] });
     var wp = c.war !== false ? tfWarMatches(type).catch(function(){ return [] }) : Promise.resolve([]);
     var mp = tfMineMatches(type).catch(function(){ return [] });
     // players we beat earlier, and whole factions checked in one call each (needs the beaten list first)
-    var ep = Promise.all([cp, tfWarIds()]).then(function(){ return Promise.all([tfFacMatches(type), tfEasyMatches(type)]) }).catch(function(){ return [[], []] });
+    var ep = Promise.all([cp, tfWarIds()]).then(function(){ return Promise.all([tfFacMatches(type), tfEasyMatches(type), tfDbMatches(type).catch(function(){ return [] })]) }).catch(function(){ return [[], [], []] });
     return Promise.all([rp, sp, bp, fp, cp, wp, mp, ep]).then(function(r){
       soonOut.push.apply(soonOut, TF.facSoon.splice(0));
       var tt = c[type], nowS0 = Date.now() / 1000;
@@ -703,7 +742,7 @@
         if (k === "ff"){
           // whole-faction finds first (already confirmed Okay, so no extra check), then everything else mixed
           tfShuffle(r[7][0].filter(fresh)).forEach(function(t){ if (!seen[t.player_id]){ seen[t.player_id] = 1; order.push(t) } });
-          var rest = r[3].concat(r[7][1]).filter(function(t){ return !seen[t.player_id] }), pool = rest.filter(fresh);
+          var rest = r[3].concat(r[7][1]).concat(r[7][2] || []).filter(function(t){ return !seen[t.player_id] }), pool = rest.filter(fresh);
           // with "don't repeat" on, people seen inside the window are never offered (it fetches a new batch instead)
           g = c.fresh ? tfShuffle(pool) : tfShuffle(rest);
         }
@@ -793,7 +832,7 @@
       if (!r.t && r.limited){ say('<span style="color:#fca5a5">Torn is limiting your API key right now (too many requests), so targets can\u2019t be checked. Try again in a minute.</span>'); return }
       if (!r.t && r.stopped){ say('Search stopped after checking ' + r.checked + ' targets.'); return }
       if (!r.t){ say('<span style="color:#fca5a5">Searched ' + MAXR + ' times and checked ' + r.checked + ' targets, but none were attackable right now. Try again in a minute, or widen the settings.</span>'); return }
-      var t = r.t; TF.used[t.player_id] = Date.now(); tfUsedSave(); tfWarm(type);
+      var t = r.t; TF.used[t.player_id] = Date.now(); tfUsedSave(); tfWarm(type); tdbFlush(false);
       var url = "https://www.torn.com/page.php?sid=attack&user2ID=" + t.player_id;
       var bits = [];
       if (t.level) bits.push("Level " + t.level);
@@ -814,6 +853,7 @@
       if (r.offline) bits.push("offline");
       if (t.soon) bits.push('<span style="color:#5eead4">⏱ just ' + (t.soon.kind === "travel" ? "landed back in Torn" : "out of hospital") + '</span>');
       if (t.easy) bits.push('<span style="color:#93c5fd">↺ beaten by us earlier</span>');
+      if (t.tdb) bits.push('<span style="color:#c4b5fd">🗃 shared target list</span>');
       var note = !t.bounty && !t.shit && !t.retal && !t.war && c.bounty !== false && bountyNote ? '<div class="meta">' + esc(bountyNote) + '</div>' : '';
       $("tfRes").innerHTML = '<div class="tf-res">' + htype
         + '<div class="nm"><a href="https://www.torn.com/profiles.php?XID=' + t.player_id + '" target="_blank" rel="noopener">' + esc(t.name) + '</a> <span class="small muted">[' + t.player_id + ']</span></div>'
@@ -829,7 +869,7 @@
   // ---------------------------------------------------------------------
   // Chain Pal: sidebar widget + settings panel
   // ---------------------------------------------------------------------
-  var CP_VERSION = "1.0.7";
+  var CP_VERSION = "1.0.8";
   var SIDE_HTML = '<div id="cpalSide" class="cpal cp-side">'
     + '<div class="cp-tm" id="cpTm"><div class="cp-ch"><span id="cpCount">Chain</span><button id="cpSnd" class="cp-snd" title="Alert sound on/off">🔕</button></div>'
     + '<div class="cp-time" id="cpTime">--:--</div><div class="cp-src"><span id="cpSrc"></span><span id="cpStale" class="hide">\u26a0 Torn\u2019s API is behind \u2013 use the in-game timer</span></div></div>'
