@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Chain Pal 🔗
 // @namespace    jay-chain-pal
-// @version      1.0.2
+// @version      1.0.3
 // @description  Big chain timer, chain alerts and a one-click target finder in Torn's sidebar (PC). By -TheKraken- [3616083].
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/*
@@ -125,6 +125,22 @@
     } catch(e){}
     return [{ at: 60, snd: "long" }, { at: 30, snd: "siren" }, { at: 0, snd: "rapid" }, { at: 0, snd: "double" }, { at: 0, snd: "chime" }]; // the original two, the rest off
   }
+  var WAKE_KEY = "cw_wake", WAKE_SW = "wakeSw", WAKE_MSG = "wakeMsg";
+  // ---- keep the screen on (screen wake lock): the page stays live, so the timer and alerts keep going ----
+  var WL = null;
+  function wakeWant(){ return store(WAKE_KEY) === "1" }
+  function wakeUI(msgTxt){
+    var c = $(WAKE_SW); if (c) c.checked = wakeWant();
+    var t = $(WAKE_MSG); if (!t) return;
+    t.textContent = msgTxt || (!wakeWant() ? "" : !("wakeLock" in navigator) ? "This browser can\u2019t keep the screen on. Set a longer screen timeout in your phone\u2019s settings instead." : WL ? "On: the screen stays on while this page is showing." : "On: it switches on again when you come back to this page.");
+  }
+  function wakeOn(){
+    if (!wakeWant() || document.hidden || WL || !("wakeLock" in navigator)){ wakeUI(); return }
+    navigator.wakeLock.request("screen").then(function(l){ WL = l; l.addEventListener("release", function(){ WL = null; wakeUI() }); wakeUI() })
+      .catch(function(e){ wakeUI("Couldn\u2019t keep the screen on here (" + (e && e.message || "not allowed") + ").") });
+  }
+  function wakeOff(){ if (WL){ try { WL.release() } catch(e){} WL = null } wakeUI() }
+  document.addEventListener("visibilitychange", function(){ if (!document.hidden) wakeOn() }); // the browser drops it when you switch away
   function playSnd(k){ audio(); (SOUNDS[k] || SOUNDS.long)[1]() }
   function alRender(){
     var A = alerts(), lab = ["First", "Second", "Third", "Fourth", "Fifth"];
@@ -802,7 +818,7 @@
   // ---------------------------------------------------------------------
   // Chain Pal: sidebar widget + settings panel
   // ---------------------------------------------------------------------
-  var CP_VERSION = "1.0.2";
+  var CP_VERSION = "1.0.3";
   var SIDE_HTML = '<div id="cpalSide" class="cpal cp-side">'
     + '<div class="cp-tm" id="cpTm"><div class="cp-ch"><span id="cpCount">Chain</span><button id="cpSnd" class="cp-snd" title="Alert sound on/off">🔕</button></div>'
     + '<div class="cp-time" id="cpTime">--:--</div><div class="cp-src"><span id="cpSrc"></span><span id="cpStale" class="hide">\u26a0 Torn\u2019s API is behind \u2013 use the in-game timer</span></div></div>'
@@ -825,6 +841,7 @@
     + '<div class="small muted" style="margin:8px 0">Up to 5 alerts. Each plays once as the chain timer drops past its time (3:30 down to 0:30), and re-arms after a hit. The timer comes straight from Torn\u2019s own chain bar, and alerts are booked ahead so they still play on time when Torn is in a background tab.</div>'
     + '<div id="ctAlRows"></div>'
     + '<label class="sw" style="margin-top:10px"><input type="checkbox" id="cpBig"><span class="tr"></span><span class="tx">Big timer in the sidebar<small>Off = a smaller timer line</small></span></label>'
+    + '<label class="sw" style="margin-top:10px"><input type="checkbox" id="cpWakeSw"><span class="tr"></span><span class="tx">\uD83D\uDD06 Keep the screen on<small>Stops your phone or PC sleeping while Torn is showing, so the timer and alerts keep going. Uses more battery.</small></span></label><div id="cpWakeMsg" class="small muted"></div>'
     + '<label class="sw" style="margin-top:10px"><input type="checkbox" id="cpPopSw"><span class="tr"></span><span class="tx">Open attacks in a pop-out window<small>Floats over the page with a red \u2715 to close it, so you stay where you were. Off = opens normally.</small></span></label>'
     + '</div>'
     + '<div id="cpTabKey" class="hide">'
@@ -1003,6 +1020,22 @@
     [["tgt", "cpTabTgt"], ["al", "cpTabAl"], ["key", "cpTabKey"]].forEach(function(x){ show(x[1], x[0] === t) });
     Array.prototype.forEach.call(document.querySelectorAll("#cpalOv [data-cptab]"), function(b){ b.classList.toggle("act", b.getAttribute("data-cptab") === t) });
   }
+  var WAKE_KEY = "cp_wake", WAKE_SW = "cpWakeSw", WAKE_MSG = "cpWakeMsg";
+  // ---- keep the screen on (screen wake lock): the page stays live, so the timer and alerts keep going ----
+  var WL = null;
+  function wakeWant(){ return store(WAKE_KEY) === "1" }
+  function wakeUI(msgTxt){
+    var c = $(WAKE_SW); if (c) c.checked = wakeWant();
+    var t = $(WAKE_MSG); if (!t) return;
+    t.textContent = msgTxt || (!wakeWant() ? "" : !("wakeLock" in navigator) ? "This browser can\u2019t keep the screen on. Set a longer screen timeout in your phone\u2019s settings instead." : WL ? "On: the screen stays on while this page is showing." : "On: it switches on again when you come back to this page.");
+  }
+  function wakeOn(){
+    if (!wakeWant() || document.hidden || WL || !("wakeLock" in navigator)){ wakeUI(); return }
+    navigator.wakeLock.request("screen").then(function(l){ WL = l; l.addEventListener("release", function(){ WL = null; wakeUI() }); wakeUI() })
+      .catch(function(e){ wakeUI("Couldn\u2019t keep the screen on here (" + (e && e.message || "not allowed") + ").") });
+  }
+  function wakeOff(){ if (WL){ try { WL.release() } catch(e){} WL = null } wakeUI() }
+  document.addEventListener("visibilitychange", function(){ if (!document.hidden) wakeOn() }); // the browser drops it when you switch away
   // ---- attacks open in a pop-out window over the page (✕ closes it). Chain Pal itself never loads inside it. ----
   var PO = null;
   function cpPopOn(){ return store("cp_popout") !== "0" }
@@ -1143,6 +1176,8 @@
   });
   $("ctAlRows").addEventListener("click", function(e){ var b = e.target.closest && e.target.closest("[data-al-play]"); if (b) playSnd(alerts()[Number(b.getAttribute("data-al-play"))].snd) });
   $("cpBig").onchange = function(){ store("cp_big", this.checked ? null : "0"); cpBig() };
+  $("cpWakeSw").onchange = function(){ store(WAKE_KEY, this.checked ? "1" : null); if (this.checked) wakeOn(); else wakeOff() };
+  wakeOn();
   $("cpPopSw").checked = cpPopOn();
   $("cpPopSw").onchange = function(){ store("cp_popout", this.checked ? null : "0") };
   // Attack links in Chain Pal (found target, retals) open in the pop-out
