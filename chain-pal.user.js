@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Chain Pal 🔗
 // @namespace    jay-chain-pal
-// @version      1.0.8
+// @version      1.0.9
 // @description  Big chain timer, chain alerts and a one-click target finder in Torn's sidebar (PC). By -TheKraken- [3616083].
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/*
@@ -606,8 +606,8 @@
     if (TF.cal.length >= 5){ var a = TF.cal.slice().sort(function(x, y){ return x - y }); TF.myBS = a[Math.floor(a.length / 2)]; try { store("cw_mybs", JSON.stringify({ v: Math.round(TF.myBS), at: Date.now() })) } catch(e){} }
   }
   function tdbAsk(type){ // what to ask the database for (needs your stats worked out first)
-    var c = tfCfg(), t = c[type]; if (!(TF.myBS > 0)) return undefined;
-    return { lo: Math.round(TF.myBS * (t.minff - 1) * 3 / 8 * 0.9), hi: Math.round(TF.myBS * (t.maxff - 1) * 3 / 8 * 1.1), minL: t.minlvl, maxL: t.maxlvl, nofac: !!c.nofac, inact: c.inactive ? (Number(c.inactDays) || 14) * 86400 : 0, seed: Math.random() };
+    var c = tfCfg(), t = c[type], my = TF.myBS > 0;
+    return { lo: my ? Math.round(TF.myBS * (t.minff - 1) * 3 / 8 * 0.9) : 0, hi: my ? Math.round(TF.myBS * (t.maxff - 1) * 3 / 8 * 1.1) : 0, minL: t.minlvl, maxL: t.maxlvl, nofac: !!c.nofac, inact: c.inactive ? (Number(c.inactDays) || 14) * 86400 : 0, seed: Math.random() };
   }
   function tfDbMatches(type){
     var c = tfCfg(), tt = c[type], wi = TF.warIds || {}, L = (TF.dbList || []).filter(function(x){ return x.p && !wi[x.f] && OUR_FACS.indexOf(x.f) < 0 && (!x.l || (x.l >= tt.minlvl && x.l <= tt.maxlvl)) });
@@ -869,7 +869,7 @@
   // ---------------------------------------------------------------------
   // Chain Pal: sidebar widget + settings panel
   // ---------------------------------------------------------------------
-  var CP_VERSION = "1.0.8";
+  var CP_VERSION = "1.0.9";
   var SIDE_HTML = '<div id="cpalSide" class="cpal cp-side">'
     + '<div class="cp-tm" id="cpTm"><div class="cp-ch"><span id="cpCount">Chain</span><button id="cpSnd" class="cp-snd" title="Alert sound on/off">🔕</button></div>'
     + '<div class="cp-time" id="cpTime">--:--</div><div class="cp-src"><span id="cpSrc"></span><span id="cpStale" class="hide">\u26a0 Torn\u2019s API is behind \u2013 use the in-game timer</span></div></div>'
