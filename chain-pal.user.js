@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Chain Pal 🔗
 // @namespace    jay-chain-pal
-// @version      1.0.12
+// @version      1.0.13
 // @description  Big chain timer, chain alerts and a one-click target finder in Torn's sidebar (PC). By -TheKraken- [3616083].
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/*
@@ -869,7 +869,7 @@
   // ---------------------------------------------------------------------
   // Chain Pal: sidebar widget + settings panel
   // ---------------------------------------------------------------------
-  var CP_VERSION = "1.0.12";
+  var CP_VERSION = "1.0.13";
   var SIDE_HTML = '<div id="cpalSide" class="cpal cp-side">'
     + '<div class="cp-tm" id="cpTm"><div class="cp-ch"><span id="cpCount">Chain</span><span class="cp-btns"><button id="cpSnd" class="cp-snd" title="Alert sound on/off">🔕</button><button id="cpMin" class="cp-snd cp-min-b" title="Minimise Chain Pal" aria-label="Minimise Chain Pal">▴</button></span></div>'
     + '<div class="cp-time" id="cpTime">--:--</div><div class="cp-src"><span id="cpSrc"></span><span id="cpStale" class="hide">\u26a0 Torn\u2019s API is behind \u2013 use the in-game timer</span></div></div>'
@@ -1270,7 +1270,7 @@
   }
   setInterval(function(){ cpPlace(); cpWatch(); clockTick() }, 1000);
   // Chain Pal running counts as online time on the Chain Watch report
-  setInterval(function(){ if (S.member) api({ op: "here", pid: S.member.pid }).catch(function(){}) }, 60000);
+  setInterval(function(){ if (S.member) api({ op: "here", pid: S.member.pid }).catch(function(){}) }, 120000);
   cpWatch(); cpBig(); alRender(); sndButton(); clockTick();
   cpIdent().then(function(){ tfShowKey() });
 })();
