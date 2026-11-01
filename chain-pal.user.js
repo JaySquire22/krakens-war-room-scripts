@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Chain Pal 🔗
 // @namespace    jay-chain-pal
-// @version      1.0.35
+// @version      1.0.36
 // @description  Big chain timer, chain alerts and a one-click target finder in Torn's sidebar (PC). Once a day it tells the Chain Watch server your Torn name, ID and faction. By -TheKraken- [3616083].
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/*
@@ -928,7 +928,7 @@
   // ---------------------------------------------------------------------
   // Chain Pal: sidebar widget + settings panel
   // ---------------------------------------------------------------------
-  var CP_VERSION = "1.0.35";
+  var CP_VERSION = "1.0.36";
   var SIDE_HTML = '<div id="cpalSide" class="cpal cp-side">'
     + '<div class="cp-ic" id="cpIc" title="Ready to use? Green = yes, grey = not yet">'
     + '<a class="cp-i" id="cpIcDrug" role="button" tabindex="0" title="Drug cooldown"><svg viewBox="0 0 24 24" aria-hidden="true"><path transform="rotate(-80 12 18)" d="M12 18Q9.1 13.9 12 10.5Q14.9 13.9 12 18Z"/><path transform="rotate(-52 12 18)" d="M12 18Q9.1 11.9 12 7.0Q14.9 11.9 12 18Z"/><path transform="rotate(-25 12 18)" d="M12 18Q9.1 10.6 12 4.5Q14.9 10.6 12 18Z"/><path transform="rotate(0 12 18)" d="M12 18Q9.1 9.5 12 2.5Q14.9 9.5 12 18Z"/><path transform="rotate(25 12 18)" d="M12 18Q9.1 10.6 12 4.5Q14.9 10.6 12 18Z"/><path transform="rotate(52 12 18)" d="M12 18Q9.1 11.9 12 7.0Q14.9 11.9 12 18Z"/><path transform="rotate(80 12 18)" d="M12 18Q9.1 13.9 12 10.5Q14.9 13.9 12 18Z"/><path d="M11.4 18h1.2v4.5h-1.2z"/></svg><i></i></a>'
@@ -1486,7 +1486,7 @@
       if (needJob){
         var same = RDY.jpDay === mid && RDY.jpTs >= mid, from = same ? RDY.jpTs + 1 : mid;
         p.push(torn("v2/user/log?from=" + from + "&limit=100", lk).then(function(d){
-          var all = d.log || [], sp = all.filter(function(e){ var t = String((e.details && e.details.title) || e.title || ""); return /special/i.test(t) || Object.keys(e.data || {}).some(function(k){ return /job.?points?/i.test(k) }) });
+          var all = d.log || [], sp = all.filter(function(e){ var t = String((e.details && e.details.title) || e.title || ""); return /(compan|job)[^]*special|special[^]*(compan|job)/i.test(t) || Object.keys(e.data || {}).some(function(k){ return /job.?points?/i.test(k) }) });
           if (!same){ RDY.jpLog = 0; if (RDY.jpDay !== mid) RDY.jpPage = 0; RDY.jpWhat = "" }
           RDY.jpLog = (RDY.jpLog || 0) + jpUsed(sp);
           var names = {}; sp.forEach(function(e){ names[String((e.details && e.details.title) || e.title || "?")] = 1 }); if (sp.length) RDY.jpWhat = Object.keys(names).join(", ");
@@ -1546,19 +1546,40 @@
   var JS_ENERGY = ["reinvigorating therapy", "coffee break", "pub lunch", "free meals", "overpowered", "early riser"];
   function jsOn(){ if (store("cp_jsfilter") === "0") return false; var d = new Date(); return (d.getUTCMonth() === 9 && d.getUTCDate() >= 24) || (d.getUTCMonth() === 10 && d.getUTCDate() === 1) }
   // "You have exchanged 20 job points for 100 energy." on the job page: count those points straight away (no need to ask Torn)
+  // Job page messages:
+  //  "You can only use 10 more job points today."  -> Torn's own figure: used = 100 - 10 (this wins over everything else)
+  //  "You have exchanged 20 job points for ..."    -> +20, counted once per time the message appears (not again when Torn redraws it)
+  var JPM = { shown: "" };
+  function jpDayCheck(mid){ if (RDY.jpDay !== mid){ RDY.jp = 0; RDY.jpLog = 0; RDY.jpPage = 0; RDY.jpTs = mid; RDY.jpWhat = ""; RDY.jpDay = mid } }
   function jpSeen(){
-    Array.prototype.forEach.call(document.querySelectorAll("div,p,span,li"), function(el){
-      if (el.closest(".cpal") || el.getAttribute("data-cpjp")) return;
-      var t = String(el.textContent || ""); if (t.length > 200) return;
-      var m = t.match(/You have exchanged\s+([\d,]+)\s+job points?/i); if (!m) return;
-      if (Array.prototype.some.call(el.children, function(c){ return /You have exchanged/i.test(c.textContent || "") })) return; // the innermost box holding the message
-      el.setAttribute("data-cpjp", "1");
-      var n = Number(m[1].replace(/,/g, "")) || 0, mid = tctMidnight(); if (!n) return;
-      rdyRestore();
-      if (RDY.jpDay !== mid){ RDY.jp = 0; RDY.jpDay = mid }
-      if (RDY.jpDay !== mid){ RDY.jpLog = 0; RDY.jpPage = 0; RDY.jpTs = mid } RDY.jpPage = (RDY.jpPage || 0) + n; RDY.jp = Math.min(100, Math.max(RDY.jpLog || 0, RDY.jpPage)); RDY.jpAt = Date.now(); rdySave(); rdyDraw();
+    var txt = "";
+    Array.prototype.some.call(document.querySelectorAll("div,p,span,li"), function(el){
+      if (el.closest(".cpal")) return false;
+      var t = String(el.textContent || ""); if (t.length > 300) return false;
+      if (!/You have exchanged\s+[\d,]+\s+job points?|only use\s+[\d,]+\s+more job points?/i.test(t)) return false;
+      if (Array.prototype.some.call(el.children, function(c){ return /exchanged|more job point/i.test(c.textContent || "") })) return false;
+      txt = t.replace(/\s+/g, " ").trim(); return true;
     });
+    if (!txt){ JPM.shown = ""; return }                 // message gone: the next one that appears is a new exchange
+    var mid = tctMidnight(), more = txt.match(/only use\s+([\d,]+)\s+more job points?/i), ex = txt.match(/You have exchanged\s+([\d,]+)\s+job points?/i);
+    if (more){
+      var used = Math.max(0, Math.min(100, 100 - Number(more[1].replace(/,/g, ""))));
+      rdyRestore(); jpDayCheck(mid);
+      if (RDY.jp !== used || JPM.shown !== txt){ RDY.jpPage = used; RDY.jpLog = Math.min(RDY.jpLog || 0, used); RDY.jpTs = Math.floor(Date.now() / 1000); RDY.jp = used; RDY.jpAt = Date.now(); RDY.jpWhat = "Torn\u2019s job page"; rdySave(); rdyDraw() }
+      JPM.shown = txt; return;
+    }
+    if (!ex || JPM.shown === txt) return;               // already counted while it's on screen
+    JPM.shown = txt;
+    // a page reload showing the same message again: don't count it twice
+    var sig = txt + "|" + mid, last = null; try { last = JSON.parse(store("cp_jpmsg") || "null") } catch(e){}
+    var firstOnPage = !JPM.seenAny; JPM.seenAny = true;
+    if (firstOnPage && last && last.sig === sig && Date.now() - last.at < 3 * 60000) return; // only a reload can show the old message straight away
+    store("cp_jpmsg", JSON.stringify({ sig: sig, at: Date.now() }));
+    var n = Number(ex[1].replace(/,/g, "")) || 0; if (!n) return;
+    rdyRestore(); jpDayCheck(mid);
+    RDY.jpPage = (RDY.jpPage || 0) + n; RDY.jp = Math.min(100, Math.max(RDY.jpLog || 0, RDY.jpPage)); RDY.jpAt = Date.now(); rdySave(); rdyDraw();
   }
+
   function jsFilter(){
     try { jpSeen() } catch(e){}
     var on = jsOn();
