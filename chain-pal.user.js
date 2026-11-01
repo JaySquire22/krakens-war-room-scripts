@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Chain Pal 🔗
 // @namespace    jay-chain-pal
-// @version      1.0.34
+// @version      1.0.35
 // @description  Big chain timer, chain alerts and a one-click target finder in Torn's sidebar (PC). Once a day it tells the Chain Watch server your Torn name, ID and faction. By -TheKraken- [3616083].
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/*
@@ -928,7 +928,7 @@
   // ---------------------------------------------------------------------
   // Chain Pal: sidebar widget + settings panel
   // ---------------------------------------------------------------------
-  var CP_VERSION = "1.0.34";
+  var CP_VERSION = "1.0.35";
   var SIDE_HTML = '<div id="cpalSide" class="cpal cp-side">'
     + '<div class="cp-ic" id="cpIc" title="Ready to use? Green = yes, grey = not yet">'
     + '<a class="cp-i" id="cpIcDrug" role="button" tabindex="0" title="Drug cooldown"><svg viewBox="0 0 24 24" aria-hidden="true"><path transform="rotate(-80 12 18)" d="M12 18Q9.1 13.9 12 10.5Q14.9 13.9 12 18Z"/><path transform="rotate(-52 12 18)" d="M12 18Q9.1 11.9 12 7.0Q14.9 11.9 12 18Z"/><path transform="rotate(-25 12 18)" d="M12 18Q9.1 10.6 12 4.5Q14.9 10.6 12 18Z"/><path transform="rotate(0 12 18)" d="M12 18Q9.1 9.5 12 2.5Q14.9 9.5 12 18Z"/><path transform="rotate(25 12 18)" d="M12 18Q9.1 10.6 12 4.5Q14.9 10.6 12 18Z"/><path transform="rotate(52 12 18)" d="M12 18Q9.1 11.9 12 7.0Q14.9 11.9 12 18Z"/><path transform="rotate(80 12 18)" d="M12 18Q9.1 13.9 12 10.5Q14.9 13.9 12 18Z"/><path d="M11.4 18h1.2v4.5h-1.2z"/></svg><i></i></a>'
@@ -1620,8 +1620,9 @@
   function medRows(doc, ident){
     if (!doc || !doc.body) return [];
     var scope = doc.querySelector("#faction-armoury") || doc.body;
-    var collect = function(list){ var out = []; list.forEach(function(row){ var t = rowText(row); if (t.length > 800 || NEVER_USE_RE.test(t) || itemKeysIn(t).length !== 1) return; var v = ident(t); if (v) out.push({ row: row, type: v }) }); return out };
-    var sels = ["ul.item-list", "ul.items-cont > li", "li[data-item]"];
+    var nameOf = function(row){ var n = row.querySelector(".name, .name-wrap, [class*='name']"); if (!n) return rowText(row); var t = n.textContent || ""; Array.prototype.forEach.call(row.querySelectorAll("img[alt], [aria-label]"), function(el){ var v = el.getAttribute("alt") || el.getAttribute("aria-label") || ""; if (ITEM_ANY_RE.test(v)) t += " " + v; ITEM_ANY_RE.lastIndex = 0 }); return t };
+    var collect = function(list){ var out = []; list.forEach(function(row){ if ((row.textContent || "").length > 2500) return; var t = nameOf(row); if (NEVER_USE_RE.test(t) || itemKeysIn(t).length !== 1) return; var v = ident(t); if (v) out.push({ row: row, type: v }) }); return out };
+    var sels = ["ul.item-list > li", "ul.items-cont > li", "li[data-item]", "ul.item-list"];
     for (var i = 0; i < sels.length; i++){ var f = collect(Array.prototype.slice.call(scope.querySelectorAll(sels[i]))); if (f.length) return f }
     var f2 = collect(Array.prototype.filter.call(scope.querySelectorAll("li"), function(li){ return !li.querySelector("li") }));
     if (f2.length || ident !== bloodType) return f2;
@@ -1691,14 +1692,15 @@
     Array.prototype.forEach.call(row.querySelectorAll("*"), function(el){ var b = el.getBoundingClientRect(); if (b.width < 12 || b.height < 12 || b.width > 100 || b.height > 100 || b.right < r.right - 110) return; var a = b.width * b.height; if (b.right > br + 1 || (Math.abs(b.right - br) <= 1 && a < ba)){ best = el; br = b.right; ba = a } });
     return best;
   }
+  function useLabelled(doc, type){ return Array.prototype.find.call(doc.querySelectorAll("a.use[aria-label], [aria-label*='Use']"), function(a){ var l = a.getAttribute("aria-label") || ""; return /use/i.test(l) && a.getClientRects().length && (bloodType(l) ? bloodType(l) === type : medName(l) === type) }) || null }
   async function mdUseLink(row, type){
-    var a = useIn(row); if (a) return a;
+    var a = useLabelled(row.ownerDocument, type) || useIn(row); if (a) return a;
     try { row.scrollIntoView({ block: "center" }) } catch(e){}
     // items page: tap the item's name to open it; armoury: tap the row's arrow / gear
     var nameEl = Array.prototype.find.call(row.querySelectorAll("*"), function(el){ return !el.childElementCount && el.getClientRects().length && (bloodType(el.textContent) === type || medName(el.textContent) === type) });
     var opener = /item\.php/.test(row.ownerDocument.location.href) ? (nameEl || row) : (rowGear(row) || nameEl);
     if (opener) clickAny(opener);
-    return await waitFor(function(){ return useIn(row) }, 2000, 100);
+    return await waitFor(function(){ return useLabelled(row.ownerDocument, type) || useIn(row) }, 2500, 100);
   }
   function mdYes(row, useLink){
     var doc = row.ownerDocument, scopes = [row.closest("ul.item-list") || row];
