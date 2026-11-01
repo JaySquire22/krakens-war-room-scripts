@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Chain Pal 🔗
 // @namespace    jay-chain-pal
-// @version      1.0.40
+// @version      1.0.41
 // @description  Big chain timer, chain alerts and a one-click target finder in Torn's sidebar (PC). Once a day it tells the Chain Watch server your Torn name, ID and faction. By -TheKraken- [3616083].
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/*
@@ -928,7 +928,7 @@
   // ---------------------------------------------------------------------
   // Chain Pal: sidebar widget + settings panel
   // ---------------------------------------------------------------------
-  var CP_VERSION = "1.0.40";
+  var CP_VERSION = "1.0.41";
   var SIDE_HTML = '<div id="cpalSide" class="cpal cp-side">'
     + '<div class="cp-ic" id="cpIc" title="Ready to use? Green = yes, grey = not yet">'
     + '<a class="cp-i" id="cpIcDrug" role="button" tabindex="0" title="Drug cooldown"><svg viewBox="0 0 24 24" aria-hidden="true"><path transform="rotate(-80 12 18)" d="M12 18Q9.1 13.9 12 10.5Q14.9 13.9 12 18Z"/><path transform="rotate(-52 12 18)" d="M12 18Q9.1 11.9 12 7.0Q14.9 11.9 12 18Z"/><path transform="rotate(-25 12 18)" d="M12 18Q9.1 10.6 12 4.5Q14.9 10.6 12 18Z"/><path transform="rotate(0 12 18)" d="M12 18Q9.1 9.5 12 2.5Q14.9 9.5 12 18Z"/><path transform="rotate(25 12 18)" d="M12 18Q9.1 10.6 12 4.5Q14.9 10.6 12 18Z"/><path transform="rotate(52 12 18)" d="M12 18Q9.1 11.9 12 7.0Q14.9 11.9 12 18Z"/><path transform="rotate(80 12 18)" d="M12 18Q9.1 13.9 12 10.5Q14.9 13.9 12 18Z"/><path d="M11.4 18h1.2v4.5h-1.2z"/></svg><i></i></a>'
@@ -1902,8 +1902,14 @@
   function pageLife(){
     var docs = []; try { if (popout && popout.frame.contentDocument) docs.push(popout.frame.contentDocument) } catch(e){} docs.push(document);
     for (var i = 0; i < docs.length; i++){
-      var el = docs[i].querySelector('#barLife [class*="bar-value"], #barLife [class*="value"], [id*="barLife"]'); if (!el) continue;
-      var m = String(el.textContent || "").replace(/,/g, "").match(/(\d+)\s*\/\s*(\d+)/); if (m) return { current: Number(m[1]), maximum: Number(m[2]) };
+      // Torn's life bar: #barLife on PC; on phones the bars along the top (its value sits next to a "Life" label or inside a life bar)
+      var cands = Array.prototype.slice.call(docs[i].querySelectorAll('#barLife [class*="value"], [id*="barLife"], [id*="lifeBar"], [class*="bar-value"], [class*="barValue"], [class*="life"] [class*="value"]'));
+      for (var k = 0; k < cands.length; k++){
+        var el = cands[k], box = el.closest('[id*="ife"], [class*="ife"], [aria-label*="ife"], [title*="ife"]') || el.parentElement;
+        var near = box ? (box.id + " " + (typeof box.className === "string" ? box.className : "") + " " + (box.getAttribute("aria-label") || "") + " " + (box.getAttribute("title") || "") + " " + (box.textContent || "")) : "";
+        if (!/life/i.test(near) && !/barLife/.test(el.id || "")) continue;
+        var m = String(el.textContent || "").replace(/,/g, "").match(/(\d+)\s*\/\s*(\d+)/); if (m) return { current: Number(m[1]), maximum: Number(m[2]) };
+      }
     }
     return null;
   }
@@ -1912,7 +1918,7 @@
     return fetch(url).then(function(r){ return r.json() }).then(function(d){
       if (/selections=bars/.test(url) && (!d || d.error)){
         var pl = pageLife(); if (pl) return { life: pl };
-        if (d && d.error && !barsWarned){ barsWarned = true; showToast("Health bar: your Chain Pal key can\u2019t read your health (" + (d.error.error || "error") + "). Make a new key: ⚙ → 🔑 Keys → ➕ Create key (it ticks \u201cbars\u201d).", { warn: true, duration: 9000 }) }
+        if (d && d.error && !barsWarned){ barsWarned = true; var why = "Health not shown: your Chain Pal key can\u2019t read it. For the health bar, make a new key with \u2699 \u2192 \uD83D\uDD11 Keys \u2192 \u2795 Create key (it ticks \u201cbars\u201d)."; try { var lb = popout && popout.root.querySelector("#tws-po-life"); if (lb) lb.title = why; mdSay(why) } catch(e){} }
       }
       return d;
     }).catch(function(){ var pl = pageLife(); return pl ? { life: pl } : null });
