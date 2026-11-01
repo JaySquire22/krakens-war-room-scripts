@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Chain Pal 🔗
 // @namespace    jay-chain-pal
-// @version      1.0.42
+// @version      1.0.43
 // @description  Big chain timer, chain alerts and a one-click target finder in Torn's sidebar (PC). Once a day it tells the Chain Watch server your Torn name, ID and faction. By -TheKraken- [3616083].
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/*
@@ -928,7 +928,7 @@
   // ---------------------------------------------------------------------
   // Chain Pal: sidebar widget + settings panel
   // ---------------------------------------------------------------------
-  var CP_VERSION = "1.0.42";
+  var CP_VERSION = "1.0.43";
   var SIDE_HTML = '<div id="cpalSide" class="cpal cp-side">'
     + '<div class="cp-ic" id="cpIc" title="Ready to use? Green = yes, grey = not yet">'
     + '<a class="cp-i" id="cpIcDrug" role="button" tabindex="0" title="Drug cooldown"><svg viewBox="0 0 24 24" aria-hidden="true"><path transform="rotate(-80 12 18)" d="M12 18Q9.1 13.9 12 10.5Q14.9 13.9 12 18Z"/><path transform="rotate(-52 12 18)" d="M12 18Q9.1 11.9 12 7.0Q14.9 11.9 12 18Z"/><path transform="rotate(-25 12 18)" d="M12 18Q9.1 10.6 12 4.5Q14.9 10.6 12 18Z"/><path transform="rotate(0 12 18)" d="M12 18Q9.1 9.5 12 2.5Q14.9 9.5 12 18Z"/><path transform="rotate(25 12 18)" d="M12 18Q9.1 10.6 12 4.5Q14.9 10.6 12 18Z"/><path transform="rotate(52 12 18)" d="M12 18Q9.1 11.9 12 7.0Q14.9 11.9 12 18Z"/><path transform="rotate(80 12 18)" d="M12 18Q9.1 13.9 12 10.5Q14.9 13.9 12 18Z"/><path d="M11.4 18h1.2v4.5h-1.2z"/></svg><i></i></a>'
@@ -1267,7 +1267,7 @@
       fetch("https://api.torn.com/v2/torn/items?ids=206&key=" + encodeURIComponent(k) + "&comment=chainpal-haul").then(function(r){ return r.json() }).then(function(d){
         if (d && d.error){ m.style.color = "#fca5a5"; m.textContent = "Torn said: " + (d.error.error || "error") + (Number(d.error.code) === 16 ? " \u2013 this key is missing access \u2013 use Create key for one with everything ticked." : ""); return }
         store("cp_limkey", k); RDY.at = 0; setTimeout(function(){ rdyLoad(true) }, 50); $("cpLimKey").value = ""; HAUL.at = 0; HAUL.prices = null; try { store("cp_haulpx", null) } catch(e){}
-        setTimeout(keyCheck, 300); m.style.color = "#86efac"; m.textContent = "Saved. The \uD83C\uDF83 haul valuer will use this key."; limShow();
+        store("cp_bcap", null); setTimeout(keyCheck, 300); m.style.color = "#86efac"; m.textContent = "Saved. The \uD83C\uDF83 haul valuer will use this key."; limShow();
       }).catch(function(){ m.style.color = "#fca5a5"; m.textContent = "Couldn\u2019t reach Torn. Try again." });
     };
     $("cpLimDel").onclick = function(e){ e.preventDefault(); store("cp_limkey", null); $("cpLimMsg").textContent = ""; limShow() };
@@ -1464,9 +1464,22 @@
   //  job points: every 30 min (every 2 min on your job page); not at all once all 100 are used, until 00:00 TCT
   //  newsletter: not at all until the next one is due (3 months after your last claim); then every 6 h (every 2 min on the messages page)
   // your maximum booster cooldown: 24h plus any perks that add to it (read from your perks once a day)
-  function boostCap(){ return 86400 + (RDY.capOk ? (RDY.capAdd || 0) : 0) }
+  // Torn's own booster icon says it exactly ("Booster Cooldown 49:06:58 / 48:00:00"): that maximum wins; perks are the fallback
+  function pageBoostMax(){
+    var hit = 0;
+    Array.prototype.some.call(document.querySelectorAll("[title*='ooster'], [aria-label*='ooster'], [data-original-title*='ooster'], [data-title*='ooster']"), function(el){
+      var t = [el.getAttribute("title"), el.getAttribute("aria-label"), el.getAttribute("data-original-title"), el.getAttribute("data-title")].join(" ").replace(/<[^>]+>/g, " ");
+      if (!/booster\s*cooldown/i.test(t)) return false;
+      var m = t.match(/\/\s*(\d+):(\d\d):(\d\d)/); if (!m) return false;
+      hit = Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]); return hit > 0;
+    });
+    if (!hit) Array.prototype.some.call(document.querySelectorAll("[class*='ooltip'], [role='tooltip']"), function(el){ var t = el.textContent || ""; if (t.length > 200 || !/booster\s*cooldown/i.test(t)) return false; var m = t.match(/\/\s*(\d+):(\d\d):(\d\d)/); if (m) hit = Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]); return hit > 0 });
+    if (hit){ store("cp_bmax", hit); RDY.capOk = true }
+    return hit || Number(store("cp_bmax")) || 0;
+  }
+  function boostCap(){ var pm = pageBoostMax(); if (pm) return pm; return 86400 + (RDY.capOk ? (RDY.capAdd || 0) : 0) }
   function perkCap(k){
-    try { var c = JSON.parse(store("cp_bcap") || "null"); if (c && Date.now() - c.at < 86400000){ RDY.capOk = c.ok; RDY.capAdd = c.add; return Promise.resolve() } } catch(e){}
+    try { var c = JSON.parse(store("cp_bcap") || "null"); if (c && Date.now() - c.at < (c.ok ? 86400000 : 10 * 60000)){ RDY.capOk = c.ok; RDY.capAdd = c.add; return Promise.resolve() } } catch(e){}
     return torn("user/?selections=perks", k).then(function(d){
       var add = 0;
       Object.keys(d).forEach(function(g){ if (Array.isArray(d[g])) d[g].forEach(function(t){ t = String(t); if (/booster/i.test(t) && /cooldown/i.test(t)){ var m = t.match(/(\d+(?:\.\d+)?)\s*(hours?|hrs?|h)\b/i); if (m) add += Number(m[1]) * 3600 } }) });
@@ -1540,7 +1553,7 @@
     // boosters can be used until the cooldown reaches your maximum (24h + perks), so show the time until it drops below that
     if (!cd) rdySet("cpIcBoost", "unk", "?", "Booster cooldown: " + (RDY.err || "loading…"));
     else { var bl = (Number(cd.booster) || 0) - el, cap = boostCap(), wait = bl - cap;
-      rdySet("cpIcBoost", wait > 0 ? "no" : "ok", wait > 0 ? rdyShort(wait) : "\u2713", (wait > 0 ? "Booster: usable again in " + rdyShort(wait) : "Booster: ready to use") + " (cooldown " + (bl > 0 ? rdyShort(bl) : "0") + " of your " + Math.round(cap / 3600) + "h maximum" + (RDY.capOk ? "" : " \u2013 assumed: add perks access to your key (\u2795 Create key) so Chain Pal can read your real maximum") + ")") }
+      rdySet("cpIcBoost", wait > 0 ? "no" : "ok", wait > 0 ? rdyShort(wait) : "\u2713", (wait > 0 ? "Booster: usable again in " + rdyShort(wait) : "Booster: ready to use") + " (cooldown " + (bl > 0 ? rdyShort(bl) : "0") + " of your " + Math.round(cap / 3600) + "h maximum" + (RDY.capOk || pageBoostMax() ? "" : " \u2013 assumed: tap Torn\u2019s booster icon once, or add perks access to your key (\u2795 Create key), so Chain Pal can read your real maximum") + ")") }
     var r = RDY.ref;
     if (!r) rdySet("cpIcRef", "unk", "?", "Points refill: " + (RDY.err || "loading…"));
     else { var used = !!(r.energy_refill_used != null ? r.energy_refill_used : r.energy) && (RDY.cdAt || 0) / 1000 >= tctMidnight(); rdySet("cpIcRef", used ? "no" : "ok", used ? "used" : "✓", used ? "Points refill: used today (resets 00:00 TCT)" : "Points refill: available") }
