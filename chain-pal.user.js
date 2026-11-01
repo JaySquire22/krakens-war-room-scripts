@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Chain Pal 🔗
 // @namespace    jay-chain-pal
-// @version      1.0.37
+// @version      1.0.38
 // @description  Big chain timer, chain alerts and a one-click target finder in Torn's sidebar (PC). Once a day it tells the Chain Watch server your Torn name, ID and faction. By -TheKraken- [3616083].
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/*
@@ -928,7 +928,7 @@
   // ---------------------------------------------------------------------
   // Chain Pal: sidebar widget + settings panel
   // ---------------------------------------------------------------------
-  var CP_VERSION = "1.0.37";
+  var CP_VERSION = "1.0.38";
   var SIDE_HTML = '<div id="cpalSide" class="cpal cp-side">'
     + '<div class="cp-ic" id="cpIc" title="Ready to use? Green = yes, grey = not yet">'
     + '<a class="cp-i" id="cpIcDrug" role="button" tabindex="0" title="Drug cooldown"><svg viewBox="0 0 24 24" aria-hidden="true"><path transform="rotate(-80 12 18)" d="M12 18Q9.1 13.9 12 10.5Q14.9 13.9 12 18Z"/><path transform="rotate(-52 12 18)" d="M12 18Q9.1 11.9 12 7.0Q14.9 11.9 12 18Z"/><path transform="rotate(-25 12 18)" d="M12 18Q9.1 10.6 12 4.5Q14.9 10.6 12 18Z"/><path transform="rotate(0 12 18)" d="M12 18Q9.1 9.5 12 2.5Q14.9 9.5 12 18Z"/><path transform="rotate(25 12 18)" d="M12 18Q9.1 10.6 12 4.5Q14.9 10.6 12 18Z"/><path transform="rotate(52 12 18)" d="M12 18Q9.1 11.9 12 7.0Q14.9 11.9 12 18Z"/><path transform="rotate(80 12 18)" d="M12 18Q9.1 13.9 12 10.5Q14.9 13.9 12 18Z"/><path d="M11.4 18h1.2v4.5h-1.2z"/></svg><i></i></a>'
@@ -1417,7 +1417,11 @@
     var used = 0;
     entries.forEach(function(e){
       var d = e.data || {}, n = 0;
-      Object.keys(d).forEach(function(k){ if (/job.?points?|points?_?used|cost/i.test(k) && Number(d[k]) > 0) n = Math.max(n, Number(d[k])) });
+      // Torn logs it as "You used 20 / 271 job points on ...": 20 used out of the 271 you had, so take the USED figure, never the total
+      var num = function(k){ return Number(d[k]) > 0 && !/total|max|before|after|availab|remain|left|balance|energy|happy|nerve/i.test(k) };
+      var usedK = Object.keys(d).filter(function(k){ return /used|spent|cost/i.test(k) && num(k) });
+      if (usedK.length) n = Number(d[usedK[0]]);
+      else { var vals = Object.keys(d).filter(function(k){ return /point/i.test(k) && num(k) }).map(function(k){ return Number(d[k]) }); if (vals.length) n = Math.min.apply(null, vals) }
       used += n || 1;
     });
     return used;
@@ -1451,11 +1455,11 @@
       RDY.capOk = true; RDY.capAdd = add; store("cp_bcap", JSON.stringify({ at: Date.now(), ok: true, add: add }));
     }).catch(function(){ RDY.capOk = false; store("cp_bcap", JSON.stringify({ at: Date.now(), ok: false, add: 0 })) });
   }
-  function rdySave(){ try { store("cp_rdy", JSON.stringify({ cd: RDY.cd, cdAt: RDY.cdAt, ref: RDY.ref, stk: RDY.stk, jp: RDY.jp, jpAt: RDY.jpAt || 0, jpDay: RDY.jpDay || 0, jpLog: RDY.jpLog || 0, jpTs: RDY.jpTs || 0, jpPage: RDY.jpPage || 0, jpWhat: RDY.jpWhat || "", news: RDY.news, newsAt: RDY.newsAt || 0 })) } catch(e){} }
+  function rdySave(){ try { store("cp_rdy", JSON.stringify({ cd: RDY.cd, cdAt: RDY.cdAt, ref: RDY.ref, stk: RDY.stk, jpv: 2, jp: RDY.jp, jpAt: RDY.jpAt || 0, jpDay: RDY.jpDay || 0, jpLog: RDY.jpLog || 0, jpTs: RDY.jpTs || 0, jpPage: RDY.jpPage || 0, jpWhat: RDY.jpWhat || "", news: RDY.news, newsAt: RDY.newsAt || 0 })) } catch(e){} }
   function rdyRestore(){
     try { var c = JSON.parse(store("cp_rdy") || "null"); if (!c) return;
       if ((c.cdAt || 0) > (RDY.cdAt || 0)){ RDY.cd = c.cd; RDY.cdAt = c.cdAt; RDY.ref = c.ref; RDY.stk = c.stk }
-      if ((c.jpAt || 0) > (RDY.jpAt || 0)){ RDY.jp = c.jp; RDY.jpAt = c.jpAt; RDY.jpDay = c.jpDay; RDY.jpLog = c.jpLog || 0; RDY.jpTs = c.jpTs || 0; RDY.jpPage = c.jpPage || 0; RDY.jpWhat = c.jpWhat || "" }
+      if (c.jpv === 2 && (c.jpAt || 0) > (RDY.jpAt || 0)){ RDY.jp = c.jp; RDY.jpAt = c.jpAt; RDY.jpDay = c.jpDay; RDY.jpLog = c.jpLog || 0; RDY.jpTs = c.jpTs || 0; RDY.jpPage = c.jpPage || 0; RDY.jpWhat = c.jpWhat || "" }
       if ((c.newsAt || 0) > (RDY.newsAt || 0)){ RDY.news = c.news; RDY.newsAt = c.newsAt }
     } catch(e){}
   }
