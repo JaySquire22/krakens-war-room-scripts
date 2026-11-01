@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Chain Pal 🔗
 // @namespace    jay-chain-pal
-// @version      1.0.28
+// @version      1.0.29
 // @description  Big chain timer, chain alerts and a one-click target finder in Torn's sidebar (PC). Once a day it tells the Chain Watch server your Torn name, ID and faction. By -TheKraken- [3616083].
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/*
@@ -928,7 +928,7 @@
   // ---------------------------------------------------------------------
   // Chain Pal: sidebar widget + settings panel
   // ---------------------------------------------------------------------
-  var CP_VERSION = "1.0.28";
+  var CP_VERSION = "1.0.29";
   var SIDE_HTML = '<div id="cpalSide" class="cpal cp-side">'
     + '<div class="cp-ic" id="cpIc" title="Ready to use? Green = yes, grey = not yet">'
     + '<a class="cp-i" id="cpIcDrug" role="button" tabindex="0" title="Drug cooldown"><svg viewBox="0 0 24 24" aria-hidden="true"><path transform="rotate(-80 12 18)" d="M12 18Q9.1 13.9 12 10.5Q14.9 13.9 12 18Z"/><path transform="rotate(-52 12 18)" d="M12 18Q9.1 11.9 12 7.0Q14.9 11.9 12 18Z"/><path transform="rotate(-25 12 18)" d="M12 18Q9.1 10.6 12 4.5Q14.9 10.6 12 18Z"/><path transform="rotate(0 12 18)" d="M12 18Q9.1 9.5 12 2.5Q14.9 9.5 12 18Z"/><path transform="rotate(25 12 18)" d="M12 18Q9.1 10.6 12 4.5Q14.9 10.6 12 18Z"/><path transform="rotate(52 12 18)" d="M12 18Q9.1 11.9 12 7.0Q14.9 11.9 12 18Z"/><path transform="rotate(80 12 18)" d="M12 18Q9.1 13.9 12 10.5Q14.9 13.9 12 18Z"/><path d="M11.4 18h1.2v4.5h-1.2z"/></svg><i></i></a>'
@@ -1393,7 +1393,7 @@
   function torn(path, key){ return fetch("https://api.torn.com/" + path + (path.indexOf("?") >= 0 ? "&" : "?") + "key=" + encodeURIComponent(key) + "&comment=chainpal").then(function(r){ return r.json() }).then(function(d){ if (d && d.error) throw new Error((d.error.error || "Torn API error") + " (" + d.error.code + ")"); return d }) }
   // the log types we need (their ids come from Torn's own list, kept for a week)
   function logTypes(key){
-    try { var c = JSON.parse(store("cp_logtypes") || "null"); if (c && Date.now() - c.at < 7 * 86400000) return Promise.resolve(c) } catch(e){}
+    try { var c = JSON.parse(store("cp_logtypes") || "null"); if (c && Date.now() - c.at < 30 * 86400000) return Promise.resolve(c) } catch(e){}
     return torn("v2/torn/logtypes", key).then(function(d){
       var all = d.logtypes || [], news = [], job = [];
       all.forEach(function(t){ var n = String(t.title || ""); if (/seasonal newsletter/i.test(n)) news.push(t.id); else if (/special/i.test(n) && /(company|job)/i.test(n)) job.push(t.id) });
@@ -1426,23 +1426,46 @@
     if (!t.classList.contains("hide") && t.getAttribute("data-for") === el.id){ t.classList.add("hide"); return }
     t.setAttribute("data-for", el.id); t.textContent = (IC_ABOUT[el.id] || "") + "\nNow: " + (el.title || "\u2014"); t.classList.remove("hide");
   }
+  // What the icons found is saved (shared by all your Torn tabs), so Torn is only asked again when something could have changed:
+  //  cooldowns / refill / McSmoogle: every 15 min (every 2 min on the items page, and once when a cooldown runs out)
+  //  job points: every 30 min (every 2 min on your job page); not at all once all 100 are used, until 00:00 TCT
+  //  newsletter: not at all until the next one is due (3 months after your last claim); then every 6 h (every 2 min on the messages page)
+  function rdySave(){ try { store("cp_rdy", JSON.stringify({ cd: RDY.cd, cdAt: RDY.cdAt, ref: RDY.ref, stk: RDY.stk, jp: RDY.jp, jpAt: RDY.jpAt || 0, jpDay: RDY.jpDay || 0, news: RDY.news, newsAt: RDY.newsAt || 0 })) } catch(e){} }
+  function rdyRestore(){
+    try { var c = JSON.parse(store("cp_rdy") || "null"); if (!c) return;
+      if ((c.cdAt || 0) > (RDY.cdAt || 0)){ RDY.cd = c.cd; RDY.cdAt = c.cdAt; RDY.ref = c.ref; RDY.stk = c.stk }
+      if ((c.jpAt || 0) > (RDY.jpAt || 0)){ RDY.jp = c.jp; RDY.jpAt = c.jpAt; RDY.jpDay = c.jpDay }
+      if ((c.newsAt || 0) > (RDY.newsAt || 0)){ RDY.news = c.news; RDY.newsAt = c.newsAt }
+    } catch(e){}
+  }
+  function onPage(re){ return re.test(location.pathname + location.search + location.hash) }
   function rdyLoad(force){
-    if (!icOn()) return;
-    if (RDY.busy || (!force && Date.now() - RDY.at < 5 * 60000)) return;
+    if (!icOn() || RDY.busy) return;
+    if (!force && document.hidden) return;
+    rdyRestore();
+    var now = Date.now(), MIN = 60000, mid = tctMidnight();
     var k = limKey() || tornKey(); if (!k){ RDY.err = "Add a Chain Pal key in ⚙ → 🔑 Keys"; rdyDraw(); return }
+    var cdAge = now - (RDY.cdAt || 0), el = cdAge / 1000, cd = RDY.cd || {};
+    var ranOut = RDY.cd && ["drug", "booster"].some(function(x){ var l = Number(cd[x]) || 0; return l > 0 && l - el <= 0 && l - el > -120 });
+    var needUser = force || !RDY.cd || cdAge > 15 * MIN || (onPage(/item\.php|points\.php|stocks/i) && cdAge > 2 * MIN) || (ranOut && cdAge > MIN);
+    var lk = logKey(), jpLeft = RDY.jp == null ? null : 100 - RDY.jp, jpAge = now - (RDY.jpAt || 0);
+    var needJob = !!lk && (force || RDY.jpDay !== mid || (jpLeft > 0 && (jpAge > 30 * MIN || (onPage(/companies\.php|joblist/i) && jpAge > 2 * MIN))));
+    var newsDue = !RDY.news || !RDY.news.last || (now / 1000 - RDY.news.last) > 90 * 86400, newsAge = now - (RDY.newsAt || 0);
+    var needNews = !!lk && (force || !RDY.news || (newsDue && (newsAge > 6 * 60 * MIN || (onPage(/messages\.php/i) && newsAge > 2 * MIN))));
+    if (!needUser && !needJob && !needNews){ rdyDraw(); return }
     RDY.busy = true; RDY.err = ""; RDY.logErr = "";
-    var a = Promise.all([torn("user/?selections=cooldowns,refills,stocks", k), mcsId(k).catch(function(){ return 0 })]).then(function(r){
+    var a = !needUser ? Promise.resolve() : Promise.all([torn("user/?selections=cooldowns,refills,stocks", k), mcsId(k).catch(function(){ return 0 })]).then(function(r){
       var d = r[0], id = r[1]; RDY.cd = d.cooldowns || null; RDY.cdAt = Date.now(); RDY.ref = d.refills || null;
       var mine = null, st = d.stocks || {}; Object.keys(st).forEach(function(k){ var x = st[k] || {}; if (id && Number(x.stock_id || k) === id) mine = x });
       RDY.stk = { owned: !!mine, div: mine && (mine.dividend || (mine.benefit && mine.benefit.ready != null ? mine.benefit : null)) || null };
     }).catch(function(e){ RDY.err = e.message });
-    var lk = logKey(), b = !lk ? Promise.resolve() : logTypes(lk).then(function(t){
-      var mid = tctMidnight(), p = [];
-      p.push(t.job.length ? torn("v2/user/log?log=" + t.job.join(",") + "&from=" + mid + "&limit=100", lk).then(function(d){ RDY.jp = jpUsed(d.log || []) }) : Promise.resolve(RDY.jp = null));
-      p.push(t.news.length ? torn("v2/user/log?log=" + t.news.join(",") + "&from=" + (Math.floor(Date.now() / 1000) - 95 * 86400) + "&limit=20", lk).then(function(d){ var l = d.log || []; RDY.news = { last: l.reduce(function(m, x){ return Math.max(m, Number(x.timestamp) || 0) }, 0) } }) : Promise.resolve(RDY.news = null));
+    var b = !(needJob || needNews) ? Promise.resolve() : logTypes(lk).then(function(t){
+      var p = [];
+      if (needJob) p.push(t.job.length ? torn("v2/user/log?log=" + t.job.join(",") + "&from=" + mid + "&limit=100", lk).then(function(d){ RDY.jp = jpUsed(d.log || []); RDY.jpAt = Date.now(); RDY.jpDay = mid }) : Promise.resolve(RDY.jp = null));
+      if (needNews) p.push(t.news.length ? torn("v2/user/log?log=" + t.news.join(",") + "&from=" + (Math.floor(Date.now() / 1000) - 95 * 86400) + "&limit=20", lk).then(function(d){ var l = d.log || []; RDY.news = { last: l.reduce(function(m, x){ return Math.max(m, Number(x.timestamp) || 0) }, (RDY.news && RDY.news.last) || 0) }; RDY.newsAt = Date.now() }) : Promise.resolve(RDY.news = null));
       return Promise.all(p);
     }).catch(function(e){ RDY.logErr = e.message });
-    Promise.all([a, b]).then(function(){ RDY.busy = false; RDY.at = Date.now(); rdyDraw() });
+    Promise.all([a, b]).then(function(){ RDY.busy = false; RDY.at = Date.now(); rdySave(); rdyDraw() });
   }
   function rdyShort(s){ s = Math.max(0, Math.round(s)); return s >= 86400 ? Math.floor(s / 86400) + "d" + (Math.floor(s % 86400 / 3600) ? Math.floor(s % 86400 / 3600) + "h" : "") : s >= 3600 ? Math.floor(s / 3600) + "h" + (s % 3600 >= 60 ? ("0" + Math.floor(s % 3600 / 60)).slice(-2) : "") : s >= 60 ? Math.ceil(s / 60) + "m" : s + "s" }
   function rdySet(id, state, label, tip){
@@ -1462,7 +1485,7 @@
     cdIcon("cpIcDrug", "drug", "Drug"); cdIcon("cpIcBoost", "booster", "Booster");
     var r = RDY.ref;
     if (!r) rdySet("cpIcRef", "unk", "?", "Points refill: " + (RDY.err || "loading…"));
-    else { var used = !!(r.energy_refill_used != null ? r.energy_refill_used : r.energy); rdySet("cpIcRef", used ? "no" : "ok", used ? "used" : "✓", used ? "Points refill: used today (resets 00:00 TCT)" : "Points refill: available") }
+    else { var used = !!(r.energy_refill_used != null ? r.energy_refill_used : r.energy) && (RDY.cdAt || 0) / 1000 >= tctMidnight(); rdySet("cpIcRef", used ? "no" : "ok", used ? "used" : "✓", used ? "Points refill: used today (resets 00:00 TCT)" : "Points refill: available") }
     var s = RDY.stk;
     if (!s) rdySet("cpIcStk", "unk", "?", "McSmoogle: " + (RDY.err || "loading…"));
     else if (!s.owned || !s.div) rdySet("cpIcStk", "no", "—", s.owned ? "McSmoogle: you don't hold enough shares for the 100 points benefit" : "McSmoogle: you don't own the benefit block (100 points every 7 days)");
@@ -1470,6 +1493,7 @@
       rdySet("cpIcStk", rd ? "ok" : "no", rd ? "✓" : dl + "d", rd ? "McSmoogle: 100 points ready to collect" : "McSmoogle: next 100 points in " + dl + " day" + (dl === 1 ? "" : "s")) }
     if (!logKey()){ rdySet("cpIcJob", "unk", "key", "Job points: add a Chain Pal key in ⚙ → 🔑 Keys"); rdySet("cpIcNews", "unk", "key", "Newsletter: add a Chain Pal key in ⚙ → 🔑 Keys") }
     else {
+      if (RDY.jp != null && RDY.jpDay && RDY.jpDay !== tctMidnight()){ RDY.jp = 0 } // a new TCT day: all 100 back
       if (RDY.jp == null) rdySet("cpIcJob", "unk", RDY.logErr ? "!" : "?", "Job points: " + (RDY.logErr || "loading…"));
       else { var left = Math.max(0, 100 - RDY.jp); rdySet("cpIcJob", left > 0 ? "ok" : "no", String(left), left > 0 ? left + " of 100 job points still usable today (resets 00:00 TCT)" : "All 100 job points used today (resets 00:00 TCT)") }
       if (RDY.news == null) rdySet("cpIcNews", "unk", RDY.logErr ? "!" : "?", "Newsletter: " + (RDY.logErr || "loading…"));
