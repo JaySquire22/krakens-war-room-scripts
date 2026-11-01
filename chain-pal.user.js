@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Chain Pal 🔗
 // @namespace    jay-chain-pal
-// @version      1.0.21
+// @version      1.0.22
 // @description  Big chain timer, chain alerts and a one-click target finder in Torn's sidebar (PC). Once a day it tells the Chain Watch server your Torn name, ID and faction. By -TheKraken- [3616083].
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/*
@@ -928,7 +928,7 @@
   // ---------------------------------------------------------------------
   // Chain Pal: sidebar widget + settings panel
   // ---------------------------------------------------------------------
-  var CP_VERSION = "1.0.21";
+  var CP_VERSION = "1.0.22";
   var SIDE_HTML = '<div id="cpalSide" class="cpal cp-side">'
     + '<div class="cp-ic" id="cpIc" title="Ready to use? Green = yes, grey = not yet">'
     + '<a class="cp-i" id="cpIcDrug" href="https://www.torn.com/item.php#drugs-items" title="Drug cooldown"><svg viewBox="0 0 24 24" aria-hidden="true"><path transform="rotate(-80 12 18)" d="M12 18Q9.1 13.9 12 10.5Q14.9 13.9 12 18Z"/><path transform="rotate(-52 12 18)" d="M12 18Q9.1 11.9 12 7.0Q14.9 11.9 12 18Z"/><path transform="rotate(-25 12 18)" d="M12 18Q9.1 10.6 12 4.5Q14.9 10.6 12 18Z"/><path transform="rotate(0 12 18)" d="M12 18Q9.1 9.5 12 2.5Q14.9 9.5 12 18Z"/><path transform="rotate(25 12 18)" d="M12 18Q9.1 10.6 12 4.5Q14.9 10.6 12 18Z"/><path transform="rotate(52 12 18)" d="M12 18Q9.1 11.9 12 7.0Q14.9 11.9 12 18Z"/><path transform="rotate(80 12 18)" d="M12 18Q9.1 13.9 12 10.5Q14.9 13.9 12 18Z"/><path d="M11.4 18h1.2v4.5h-1.2z"/></svg><i></i></a>'
@@ -959,7 +959,7 @@
     + '<div class="small muted" style="margin:8px 0">Up to 5 alerts. Each plays once as the chain timer drops past its time (3:30 down to 0:30), and re-arms after a hit. The timer comes straight from Torn\u2019s own chain bar, and alerts are booked ahead so they still play on time when Torn is in a background tab.</div>'
     + '<div id="ctAlRows"></div>'
     + '<label class="sw" style="margin-top:10px"><input type="checkbox" id="cpCwSw"><span class="tr"></span><span class="tx">⏱ Chain timer &amp; alerts (Chain Watch)<small>Off = no chain timer, no alerts and no chain checks. The ready-to-use icons and the target finder keep working.</small></span></label>'
-    + '<label class="sw" style="margin-top:10px"><input type="checkbox" id="cpJsSw"><span class="tr"></span><span class="tx">🎃 Halloween week: energy job specials only<small>From 24 to 31 October (TCT), your job page shows only the specials that give energy (e.g. Reinvigorating Therapy) and how many job points you can still use today.</small></span></label>'
+    + '<label class="sw" style="margin-top:10px"><input type="checkbox" id="cpJsSw"><span class="tr"></span><span class="tx">🎃 Halloween week: energy job specials only<small>From 24 October to 1 November (TCT), your job page shows only the specials that give energy (e.g. Reinvigorating Therapy) and how many job points you can still use today.</small></span></label>'
     + '<label class="sw" style="margin-top:10px"><input type="checkbox" id="cpBig"><span class="tr"></span><span class="tx">Big timer in the sidebar<small>Off = a smaller timer line</small></span></label>'
     + '<label class="sw" style="margin-top:10px"><input type="checkbox" id="cpWakeSw"><span class="tr"></span><span class="tx">\uD83D\uDD06 Keep the screen on<small>Stops your phone or PC sleeping while Torn is showing, so the timer and alerts keep going. Uses more battery.</small></span></label><div class="small muted" style="margin:2px 0 4px;line-height:1.4">\u26a0 Only while this page is on screen: switching tab or app, minimising, or locking your phone yourself stops it (it comes back when you return). Works in Chrome, Edge and Samsung Internet, and Safari on iOS 16.4+. Not in Firefox, and may not work in Torn PDA or older browsers.</div><div id="cpWakeMsg" class="small" style="color:#fde68a"></div>'
     + '<label class="sw" style="margin-top:10px"><input type="checkbox" id="cpPopSw"><span class="tr"></span><span class="tx">Open attacks in a pop-out window<small>Floats over the page with a red \u2715 to close it, so you stay where you were. Off = opens normally.</small></span></label>'
@@ -1464,7 +1464,7 @@
   // 🎃 Halloween week (24–31 Oct TCT): the job page shows only the specials that give energy, and job points left today
   // ---------------------------------------------------------------------
   var JS_ENERGY = ["reinvigorating therapy", "coffee break", "pub lunch", "free meals", "overpowered", "early riser"];
-  function jsOn(){ if (store("cp_jsfilter") === "0") return false; var d = new Date(); return d.getUTCMonth() === 9 && d.getUTCDate() >= 24 }
+  function jsOn(){ if (store("cp_jsfilter") === "0") return false; var d = new Date(); return (d.getUTCMonth() === 9 && d.getUTCDate() >= 24) || (d.getUTCMonth() === 10 && d.getUTCDate() === 1) }
   function jsFilter(){
     var head = null;
     Array.prototype.forEach.call(document.querySelectorAll("h1,h2,h3,h4,h5,div,span,li"), function(el){ if (!head && el.children.length === 0 && /^\s*Specials\s*$/.test(el.textContent || "") && !el.closest(".cpal")) head = el });
