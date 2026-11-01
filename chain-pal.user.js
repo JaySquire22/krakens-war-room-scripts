@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Chain Pal 🔗
 // @namespace    jay-chain-pal
-// @version      1.0.26
+// @version      1.0.27
 // @description  Big chain timer, chain alerts and a one-click target finder in Torn's sidebar (PC). Once a day it tells the Chain Watch server your Torn name, ID and faction. By -TheKraken- [3616083].
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/*
@@ -928,7 +928,7 @@
   // ---------------------------------------------------------------------
   // Chain Pal: sidebar widget + settings panel
   // ---------------------------------------------------------------------
-  var CP_VERSION = "1.0.26";
+  var CP_VERSION = "1.0.27";
   var SIDE_HTML = '<div id="cpalSide" class="cpal cp-side">'
     + '<div class="cp-ic" id="cpIc" title="Ready to use? Green = yes, grey = not yet">'
     + '<a class="cp-i" id="cpIcDrug" role="button" tabindex="0" title="Drug cooldown"><svg viewBox="0 0 24 24" aria-hidden="true"><path transform="rotate(-80 12 18)" d="M12 18Q9.1 13.9 12 10.5Q14.9 13.9 12 18Z"/><path transform="rotate(-52 12 18)" d="M12 18Q9.1 11.9 12 7.0Q14.9 11.9 12 18Z"/><path transform="rotate(-25 12 18)" d="M12 18Q9.1 10.6 12 4.5Q14.9 10.6 12 18Z"/><path transform="rotate(0 12 18)" d="M12 18Q9.1 9.5 12 2.5Q14.9 9.5 12 18Z"/><path transform="rotate(25 12 18)" d="M12 18Q9.1 10.6 12 4.5Q14.9 10.6 12 18Z"/><path transform="rotate(52 12 18)" d="M12 18Q9.1 11.9 12 7.0Q14.9 11.9 12 18Z"/><path transform="rotate(80 12 18)" d="M12 18Q9.1 13.9 12 10.5Q14.9 13.9 12 18Z"/><path d="M11.4 18h1.2v4.5h-1.2z"/></svg><i></i></a>'
@@ -969,8 +969,8 @@
     + '<div id="cpTabKey" class="hide">'
     + "<div id=\"tfKeyBox\">\n      <p class=\"small muted\" style=\"margin:0 0 8px\">Uses <b>FF Scouter</b> to find targets. You need your own Torn API key, registered once at <a href=\"https://ffscouter.com\" target=\"_blank\" rel=\"noopener\" style=\"color:var(--accent)\">ffscouter.com</a>. Your key is saved only on this device. It's never sent to the Chain Watch server, only to FF Scouter and Torn.</p>\n      <label>Your Torn API key (16 characters)</label>\n      <input id=\"tfKey\" type=\"password\" autocomplete=\"off\" autocapitalize=\"off\" spellcheck=\"false\" placeholder=\"Paste your API key\">\n      <button class=\"btn\" id=\"tfKeySave\">Save key</button>\n      <div id=\"tfKeyMsg\"></div>\n    </div>"
     + '<div id="tfKeyHave" class="small muted hide" style="margin-top:8px">FF Scouter key saved · <span id="tfKeyShow"></span> · <a href="#" id="tfKeyChange">Change</a> · <a href="#" id="tfKeyDel" style="color:#fca5a5">Remove</a></div>'
-    + '<div class="cp-lk"><div class="small"><b>🔑 Limited key</b> · for the 🎃 treat haul valuer and the ready-to-use icons (cooldowns, refill, job points, newsletter, McSmoogle). Make one in Torn: Settings → API Keys → Limited access.</div>'
-    + '<div class="cp-lk-row"><input id="cpLimKey" type="password" maxlength="16" placeholder="16-character Limited key" autocomplete="off"><button id="cpLimSave">Save</button></div>'
+    + '<div class="cp-lk"><div class="small"><b>🔑 Chain Pal key</b> · for the 🎃 treat haul valuer and the ready-to-use icons (cooldowns, refill, job points, newsletter, McSmoogle). Best: <a href="https://www.torn.com/preferences.php#tab=api?step=addNewKey&title=Chain%20Pal&user=basic,profile,cooldowns,refills,stocks,log&faction=basic,chain,members&torn=items,bounties,stocks,logtypes" target="_blank" rel="noopener" style="color:#86efac;font-weight:700">make a Chain Pal key in Torn</a> \u2013 it opens Torn\u2019s new-key form already named and ticked with only what Chain Pal reads (your cooldowns, refill, stocks, log; your faction\u2019s chain and members; Torn\u2019s item prices, bounties and stock list). Tap Create, then paste the key here. A Full access key also works.</div>'
+    + '<div class="cp-lk-row"><input id="cpLimKey" type="password" maxlength="16" placeholder="16-character key" autocomplete="off"><button id="cpLimSave">Save</button></div>'
     + '<div id="cpLimHave" class="small muted hide">Limited key saved · <span id="cpLimShow"></span> · <a href="#" id="cpLimDel" style="color:#fca5a5">Remove</a></div><div id="cpLimMsg" class="small"></div></div>'
     + '<div id="cpMe" class="small muted" style="margin-top:8px"></div>'
     + '<div class="small muted" style="margin-top:10px">Your keys stay in your userscript storage. They\u2019re only sent to Torn and FF Scouter, never to the Chain Watch server. Once a day Chain Pal tells the Chain Watch server your Torn name, ID and faction (so its author can see who uses it). The bounty / status-check key lives in Targets → 🔑 Torn key for bounties.</div>'
@@ -1428,7 +1428,7 @@
   function rdyLoad(force){
     if (!icOn()) return;
     if (RDY.busy || (!force && Date.now() - RDY.at < 5 * 60000)) return;
-    var k = limKey() || tornKey(); if (!k){ RDY.err = "Add a Limited key in ⚙ → 🔑 Keys"; rdyDraw(); return }
+    var k = limKey() || tornKey(); if (!k){ RDY.err = "Add a Chain Pal key in ⚙ → 🔑 Keys"; rdyDraw(); return }
     RDY.busy = true; RDY.err = ""; RDY.logErr = "";
     var a = Promise.all([torn("user/?selections=cooldowns,refills,stocks", k), mcsId(k).catch(function(){ return 0 })]).then(function(r){
       var d = r[0], id = r[1]; RDY.cd = d.cooldowns || null; RDY.cdAt = Date.now(); RDY.ref = d.refills || null;
@@ -1467,7 +1467,7 @@
     else if (!s.owned || !s.div) rdySet("cpIcStk", "no", "—", s.owned ? "McSmoogle: you don't hold enough shares for the 100 points benefit" : "McSmoogle: you don't own the benefit block (100 points every 7 days)");
     else { var dv = s.div, rd = Number(dv.ready) > 0, dl = Math.max(0, (Number(dv.frequency) || 7) - (Number(dv.progress) || 0));
       rdySet("cpIcStk", rd ? "ok" : "no", rd ? "✓" : dl + "d", rd ? "McSmoogle: 100 points ready to collect" : "McSmoogle: next 100 points in " + dl + " day" + (dl === 1 ? "" : "s")) }
-    if (!logKey()){ rdySet("cpIcJob", "unk", "key", "Job points: add a Limited key in ⚙ → 🔑 Keys"); rdySet("cpIcNews", "unk", "key", "Newsletter: add a Limited key in ⚙ → 🔑 Keys") }
+    if (!logKey()){ rdySet("cpIcJob", "unk", "key", "Job points: add a Chain Pal key in ⚙ → 🔑 Keys"); rdySet("cpIcNews", "unk", "key", "Newsletter: add a Chain Pal key in ⚙ → 🔑 Keys") }
     else {
       if (RDY.jp == null) rdySet("cpIcJob", "unk", RDY.logErr ? "!" : "?", "Job points: " + (RDY.logErr || "loading…"));
       else { var left = Math.max(0, 100 - RDY.jp); rdySet("cpIcJob", left > 0 ? "ok" : "no", String(left), left > 0 ? left + " of 100 job points still usable today (resets 00:00 TCT)" : "All 100 job points used today (resets 00:00 TCT)") }
@@ -1508,7 +1508,7 @@
     if (!on){ if (badge) badge.remove(); return }
     if (!badge){ badge = document.createElement("div"); badge.id = "cpJsBadge"; badge.className = "cpal cp-jsb"; head.parentElement.insertBefore(badge, head.nextSibling) }
     var left = RDY.jp == null ? null : Math.max(0, 100 - RDY.jp);
-    var txt = "🎃 Chain Pal · " + (left == null ? (logKey() ? "checking your job points…" : "add a Limited key in Chain Pal to see job points left today") : "<b>" + left + "</b> of 100 job points still usable today") + (hidden ? " · " + hidden + " other special" + (hidden === 1 ? "" : "s") + " hidden for Halloween week" : "");
+    var txt = "🎃 Chain Pal · " + (left == null ? (logKey() ? "checking your job points…" : "add a Chain Pal key (⚙ → 🔑 Keys) to see job points left today") : "<b>" + left + "</b> of 100 job points still usable today") + (hidden ? " · " + hidden + " other special" + (hidden === 1 ? "" : "s") + " hidden for Halloween week" : "");
     if (badge.getAttribute("data-t") !== txt){ badge.setAttribute("data-t", txt); badge.innerHTML = txt }
   }
   // ---------------------------------------------------------------------
