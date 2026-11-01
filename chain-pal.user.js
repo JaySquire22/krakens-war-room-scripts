@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Chain Pal 🔗
 // @namespace    jay-chain-pal
-// @version      1.0.43
+// @version      1.0.44
 // @description  Big chain timer, chain alerts and a one-click target finder in Torn's sidebar (PC). Once a day it tells the Chain Watch server your Torn name, ID and faction. By -TheKraken- [3616083].
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/*
@@ -928,7 +928,7 @@
   // ---------------------------------------------------------------------
   // Chain Pal: sidebar widget + settings panel
   // ---------------------------------------------------------------------
-  var CP_VERSION = "1.0.43";
+  var CP_VERSION = "1.0.44";
   var SIDE_HTML = '<div id="cpalSide" class="cpal cp-side">'
     + '<div class="cp-ic" id="cpIc" title="Ready to use? Green = yes, grey = not yet">'
     + '<a class="cp-i" id="cpIcDrug" role="button" tabindex="0" title="Drug cooldown"><svg viewBox="0 0 24 24" aria-hidden="true"><path transform="rotate(-80 12 18)" d="M12 18Q9.1 13.9 12 10.5Q14.9 13.9 12 18Z"/><path transform="rotate(-52 12 18)" d="M12 18Q9.1 11.9 12 7.0Q14.9 11.9 12 18Z"/><path transform="rotate(-25 12 18)" d="M12 18Q9.1 10.6 12 4.5Q14.9 10.6 12 18Z"/><path transform="rotate(0 12 18)" d="M12 18Q9.1 9.5 12 2.5Q14.9 9.5 12 18Z"/><path transform="rotate(25 12 18)" d="M12 18Q9.1 10.6 12 4.5Q14.9 10.6 12 18Z"/><path transform="rotate(52 12 18)" d="M12 18Q9.1 11.9 12 7.0Q14.9 11.9 12 18Z"/><path transform="rotate(80 12 18)" d="M12 18Q9.1 13.9 12 10.5Q14.9 13.9 12 18Z"/><path d="M11.4 18h1.2v4.5h-1.2z"/></svg><i></i></a>'
@@ -1474,9 +1474,23 @@
       hit = Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]); return hit > 0;
     });
     if (!hit) Array.prototype.some.call(document.querySelectorAll("[class*='ooltip'], [role='tooltip']"), function(el){ var t = el.textContent || ""; if (t.length > 200 || !/booster\s*cooldown/i.test(t)) return false; var m = t.match(/\/\s*(\d+):(\d\d):(\d\d)/); if (m) hit = Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]); return hit > 0 });
-    if (hit){ store("cp_bmax", hit); RDY.capOk = true }
+    if (!hit){ // any text saying "Booster Cooldown", with "/ 48:00:00" next to it (Torn's tooltip, whatever it's built from)
+      try {
+        var xr = document.evaluate("//*[contains(translate(text(),'BOOSTER COLDWN','booster coldwn'),'booster cooldown')]", document.body, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
+        for (var xi = 0; xi < xr.snapshotLength && !hit; xi++){
+          for (var up = xr.snapshotItem(xi), n = 0; up && n < 4 && !hit; up = up.parentElement, n++){
+            if (up.closest && up.closest(".cpal")) break;
+            var tm = String(up.textContent || "").slice(0, 300).match(/\/\s*(\d+):(\d\d):(\d\d)/); if (tm) hit = Number(tm[1]) * 3600 + Number(tm[2]) * 60 + Number(tm[3]);
+          }
+        }
+      } catch(e){}
+    }
+    if (hit && hit !== Number(store("cp_bmax"))){ store("cp_bmax", hit); RDY.capOk = true; setTimeout(function(){ try { rdyDraw() } catch(e){} }, 0) }
+    else if (hit){ RDY.capOk = true }
     return hit || Number(store("cp_bmax")) || 0;
   }
+  var bmT = null;
+  try { new MutationObserver(function(recs){ if (bmT || !recs.some(function(r){ return Array.prototype.some.call(r.addedNodes, function(n){ return /ooster/i.test(n.textContent || "") }) || (r.type === "attributes" && /ooster/i.test(r.target.getAttribute && (r.target.getAttribute(r.attributeName) || ""))) })) return; bmT = setTimeout(function(){ bmT = null; try { pageBoostMax() } catch(e){} }, 400) }).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["title", "aria-label", "data-original-title"] }) } catch(e){}
   function boostCap(){ var pm = pageBoostMax(); if (pm) return pm; return 86400 + (RDY.capOk ? (RDY.capAdd || 0) : 0) }
   function perkCap(k){
     try { var c = JSON.parse(store("cp_bcap") || "null"); if (c && Date.now() - c.at < (c.ok ? 86400000 : 10 * 60000)){ RDY.capOk = c.ok; RDY.capAdd = c.add; return Promise.resolve() } } catch(e){}
