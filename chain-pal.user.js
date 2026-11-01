@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Chain Pal 🔗
 // @namespace    jay-chain-pal
-// @version      1.0.45
+// @version      1.0.46
 // @description  Big chain timer, chain alerts and a one-click target finder in Torn's sidebar (PC). Once a day it tells the Chain Watch server your Torn name, ID and faction. By -TheKraken- [3616083].
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/*
@@ -928,7 +928,7 @@
   // ---------------------------------------------------------------------
   // Chain Pal: sidebar widget + settings panel
   // ---------------------------------------------------------------------
-  var CP_VERSION = "1.0.45";
+  var CP_VERSION = "1.0.46";
   var SIDE_HTML = '<div id="cpalSide" class="cpal cp-side">'
     + '<div class="cp-ic" id="cpIc" title="Ready to use? Green = yes, grey = not yet">'
     + '<a class="cp-i" id="cpIcDrug" role="button" tabindex="0" title="Drug cooldown"><svg viewBox="0 0 24 24" aria-hidden="true"><path transform="rotate(-80 12 18)" d="M12 18Q9.1 13.9 12 10.5Q14.9 13.9 12 18Z"/><path transform="rotate(-52 12 18)" d="M12 18Q9.1 11.9 12 7.0Q14.9 11.9 12 18Z"/><path transform="rotate(-25 12 18)" d="M12 18Q9.1 10.6 12 4.5Q14.9 10.6 12 18Z"/><path transform="rotate(0 12 18)" d="M12 18Q9.1 9.5 12 2.5Q14.9 9.5 12 18Z"/><path transform="rotate(25 12 18)" d="M12 18Q9.1 10.6 12 4.5Q14.9 10.6 12 18Z"/><path transform="rotate(52 12 18)" d="M12 18Q9.1 11.9 12 7.0Q14.9 11.9 12 18Z"/><path transform="rotate(80 12 18)" d="M12 18Q9.1 13.9 12 10.5Q14.9 13.9 12 18Z"/><path d="M11.4 18h1.2v4.5h-1.2z"/></svg><i></i></a>'
@@ -1309,7 +1309,7 @@
       fetch("https://api.torn.com/v2/torn/items?ids=206&key=" + encodeURIComponent(k) + "&comment=chainpal-haul").then(function(r){ return r.json() }).then(function(d){
         if (d && d.error){ m.style.color = "#fca5a5"; m.textContent = "Torn said: " + (d.error.error || "error") + (Number(d.error.code) === 16 ? " \u2013 this key is missing access \u2013 use Create key for one with everything ticked." : ""); return }
         store("cp_limkey", k); RDY.at = 0; setTimeout(function(){ rdyLoad(true) }, 50); $("cpLimKey").value = ""; HAUL.at = 0; HAUL.prices = null; try { store("cp_haulpx", null) } catch(e){}
-        store("cp_bcap", null); setTimeout(keyCheck, 300); m.style.color = "#86efac"; m.textContent = "Saved. The \uD83C\uDF83 haul valuer will use this key."; limShow();
+        store("cp_bcap", null); store("cp_rdy", null); store("cp_mcsid", null); RDY.cd = RDY.ref = RDY.stk = RDY.jp = RDY.news = null; RDY.cdAt = RDY.jpAt = RDY.newsAt = RDY.jpDay = RDY.jpTs = RDY.jpLog = RDY.jpPage = 0; RDY.wait = 0; RDY.busy = false; setTimeout(keyCheck, 300); m.style.color = "#86efac"; m.textContent = "Saved. The \uD83C\uDF83 haul valuer will use this key."; limShow();
       }).catch(function(){ m.style.color = "#fca5a5"; m.textContent = "Couldn\u2019t reach Torn. Try again." });
     };
     $("cpLimDel").onclick = function(e){ e.preventDefault(); store("cp_limkey", null); $("cpLimMsg").textContent = ""; limShow() };
@@ -1577,7 +1577,7 @@
       if (needJob){
         var same = RDY.jpDay === mid && RDY.jpTs >= mid, from = same ? RDY.jpTs + 1 : mid;
         p.push(torn("v2/user/log?from=" + from + "&limit=100", lk).then(function(d){
-          var all = d.log || [], sp = all.filter(function(e){ var t = String((e.details && e.details.title) || e.title || ""); return /(compan|job)[^]*special|special[^]*(compan|job)/i.test(t) || Object.keys(e.data || {}).some(function(k){ return /job.?points?/i.test(k) }) });
+          var all = d.log || [], sp = all.filter(function(e){ var t = String((e.details && e.details.title) || e.title || ""); var cat = String((e.details && e.details.category) || e.category || ""), ks = Object.keys(e.data || {}).join(" "); return /(compan|job)[^]*special|special[^]*(compan|job)|job.?points?/i.test(t) || (/special/i.test(t) && /compan|job/i.test(cat)) || /job.?points?/i.test(ks) || (/special/i.test(ks) && /point/i.test(ks)) });
           if (!same){ RDY.jpLog = 0; if (RDY.jpDay !== mid) RDY.jpPage = 0; RDY.jpWhat = "" }
           RDY.jpLog = (RDY.jpLog || 0) + jpUsed(sp);
           var names = {}; sp.forEach(function(e){ names[String((e.details && e.details.title) || e.title || "?")] = 1 }); if (sp.length) RDY.jpWhat = Object.keys(names).join(", ");
@@ -1647,14 +1647,16 @@
     Array.prototype.some.call(document.querySelectorAll("div,p,span,li"), function(el){
       if (el.closest(".cpal")) return false;
       var t = String(el.textContent || ""); if (t.length > 300) return false;
-      if (!/You have exchanged\s+[\d,]+\s+job points?|only use\s+[\d,]+\s+more job points?/i.test(t)) return false;
-      if (Array.prototype.some.call(el.children, function(c){ return /exchanged|more job point/i.test(c.textContent || "") })) return false;
+      if (!/You have exchanged\s+[\d,]+\s+job points?|only use\s+[\d,]+\s+(more\s+)?job points?|(no|any)\s+more\s+job points?|already used[^.]*job points?/i.test(t)) return false;
+      if (Array.prototype.some.call(el.children, function(c){ return /exchanged|job point/i.test(c.textContent || "") })) return false;
       txt = t.replace(/\s+/g, " ").trim(); return true;
     });
     if (!txt){ JPM.shown = ""; return }                 // message gone: the next one that appears is a new exchange
     var mid = tctMidnight(), more = txt.match(/only use\s+([\d,]+)\s+more job points?/i), ex = txt.match(/You have exchanged\s+([\d,]+)\s+job points?/i);
-    if (more){
-      var used = Math.max(0, Math.min(100, 100 - Number(more[1].replace(/,/g, ""))));
+    // the limit message with no "X more" (or "no / any more", "already used") means none are left
+    var none = !more && !ex && /each day|(no|any)\s+more\s+job points?|already used/i.test(txt);
+    if (more || none){
+      var used = none ? 100 : Math.max(0, Math.min(100, 100 - Number(more[1].replace(/,/g, ""))));
       rdyRestore(); jpDayCheck(mid);
       if (RDY.jp !== used || JPM.shown !== txt){ RDY.jpPage = used; RDY.jpLog = Math.min(RDY.jpLog || 0, used); RDY.jpTs = Math.floor(Date.now() / 1000); RDY.jp = used; RDY.jpAt = Date.now(); RDY.jpWhat = "Torn\u2019s job page"; rdySave(); rdyDraw() }
       JPM.shown = txt; return;
