@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Chain Pal 🔗
 // @namespace    jay-chain-pal
-// @version      1.0.46
+// @version      1.0.47
 // @description  Big chain timer, chain alerts and a one-click target finder in Torn's sidebar (PC). Once a day it tells the Chain Watch server your Torn name, ID and faction. By -TheKraken- [3616083].
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/*
@@ -928,7 +928,7 @@
   // ---------------------------------------------------------------------
   // Chain Pal: sidebar widget + settings panel
   // ---------------------------------------------------------------------
-  var CP_VERSION = "1.0.46";
+  var CP_VERSION = "1.0.47";
   var SIDE_HTML = '<div id="cpalSide" class="cpal cp-side">'
     + '<div class="cp-ic" id="cpIc" title="Ready to use? Green = yes, grey = not yet">'
     + '<a class="cp-i" id="cpIcDrug" role="button" tabindex="0" title="Drug cooldown"><svg viewBox="0 0 24 24" aria-hidden="true"><path transform="rotate(-80 12 18)" d="M12 18Q9.1 13.9 12 10.5Q14.9 13.9 12 18Z"/><path transform="rotate(-52 12 18)" d="M12 18Q9.1 11.9 12 7.0Q14.9 11.9 12 18Z"/><path transform="rotate(-25 12 18)" d="M12 18Q9.1 10.6 12 4.5Q14.9 10.6 12 18Z"/><path transform="rotate(0 12 18)" d="M12 18Q9.1 9.5 12 2.5Q14.9 9.5 12 18Z"/><path transform="rotate(25 12 18)" d="M12 18Q9.1 10.6 12 4.5Q14.9 10.6 12 18Z"/><path transform="rotate(52 12 18)" d="M12 18Q9.1 11.9 12 7.0Q14.9 11.9 12 18Z"/><path transform="rotate(80 12 18)" d="M12 18Q9.1 13.9 12 10.5Q14.9 13.9 12 18Z"/><path d="M11.4 18h1.2v4.5h-1.2z"/></svg><i></i></a>'
@@ -1086,7 +1086,7 @@
     S.fbBusy = true;
     var done = function(){ S.fbBusy = false; var l = S.fb && S.fb.exp ? (S.fb.exp - Date.now()) / 1000 : null; S.fbNext = Date.now() + (l != null && l > 0 && l <= AL_MAX + 20 ? 5000 : l != null && l > 0 ? Math.min(30000, Math.max(5000, (l - AL_MAX - 15) * 1000)) : 30000) };
     var p;
-    if (CP_FACTIONS.indexOf(S.f) >= 0) p = api({ op: "chain", pid: S.member ? S.member.pid : 0 }).then(function(j){
+    if (false && CP_FACTIONS.indexOf(S.f) >= 0) p = api({ op: "chain", pid: S.member ? S.member.pid : 0 }).then(function(j){
       var c = j.chain || {}, sk = (j.now || Date.now() / 1000) - Date.now() / 1000;
       var stale = c.staleSince && c.src !== "page" && j.now - c.staleSince >= 20;
       S.fb = { n: c.current || 0, exp: c.expiry && c.current ? (c.expiry - sk) * 1000 : 0, stale: !!stale, src: c.src === "page" ? "Torn pages" : "Chain Watch" };
@@ -2727,7 +2727,7 @@
   var cpMdErr = 0; setInterval(function(){ try { mdTick() } catch(e){ if (!cpMdErr++) cpErr("quick med", e) } }, 2000);
   var cpJsErr = 0; setInterval(function(){ try { jsFilter() } catch(e){ if (!cpJsErr++) cpErr("job page", e) } }, 2000);
   // Chain Pal running counts as online time on the Chain Watch report
-  setInterval(function(){ if (S.member) api({ op: "here", pid: S.member.pid }).catch(function(){}) }, 120000);
+  // presence pings switched off with chain watching (1 Nov 2026)
   [mdApply, icApply, cwApply, cpWatch, cpBig, alRender, sndButton, clockTick, rdyLoad, rdyDraw].forEach(function(fn){ try { fn() } catch(e){ cpErr(fn.name || "start", e) } });
   var cpKeyUi = function(){ try { tfShowKey() } catch(e){ cpErr("keys", e) } };
   try { cpKeyUi(); cpIdent().then(function(m){ cpKeyUi(); cpCheckIn(m) }, function(e){ cpErr("identity", e); cpKeyUi() }) } catch(e){ cpErr("identity", e); cpKeyUi() }
