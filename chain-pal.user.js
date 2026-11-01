@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Chain Pal 🔗
 // @namespace    jay-chain-pal
-// @version      1.0.30
+// @version      1.0.31
 // @description  Big chain timer, chain alerts and a one-click target finder in Torn's sidebar (PC). Once a day it tells the Chain Watch server your Torn name, ID and faction. By -TheKraken- [3616083].
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/*
@@ -928,7 +928,7 @@
   // ---------------------------------------------------------------------
   // Chain Pal: sidebar widget + settings panel
   // ---------------------------------------------------------------------
-  var CP_VERSION = "1.0.30";
+  var CP_VERSION = "1.0.31";
   var SIDE_HTML = '<div id="cpalSide" class="cpal cp-side">'
     + '<div class="cp-ic" id="cpIc" title="Ready to use? Green = yes, grey = not yet">'
     + '<a class="cp-i" id="cpIcDrug" role="button" tabindex="0" title="Drug cooldown"><svg viewBox="0 0 24 24" aria-hidden="true"><path transform="rotate(-80 12 18)" d="M12 18Q9.1 13.9 12 10.5Q14.9 13.9 12 18Z"/><path transform="rotate(-52 12 18)" d="M12 18Q9.1 11.9 12 7.0Q14.9 11.9 12 18Z"/><path transform="rotate(-25 12 18)" d="M12 18Q9.1 10.6 12 4.5Q14.9 10.6 12 18Z"/><path transform="rotate(0 12 18)" d="M12 18Q9.1 9.5 12 2.5Q14.9 9.5 12 18Z"/><path transform="rotate(25 12 18)" d="M12 18Q9.1 10.6 12 4.5Q14.9 10.6 12 18Z"/><path transform="rotate(52 12 18)" d="M12 18Q9.1 11.9 12 7.0Q14.9 11.9 12 18Z"/><path transform="rotate(80 12 18)" d="M12 18Q9.1 13.9 12 10.5Q14.9 13.9 12 18Z"/><path d="M11.4 18h1.2v4.5h-1.2z"/></svg><i></i></a>'
@@ -970,8 +970,8 @@
     + "<div id=\"tfKeyBox\">\n      <p class=\"small muted\" style=\"margin:0 0 8px\">Uses <b>FF Scouter</b> to find targets. You need your own Torn API key, registered once at <a href=\"https://ffscouter.com\" target=\"_blank\" rel=\"noopener\" style=\"color:var(--accent)\">ffscouter.com</a>. Your key is saved only on this device. It's never sent to the Chain Watch server, only to FF Scouter and Torn.</p>\n      <label>Your Torn API key (16 characters)</label>\n      <input id=\"tfKey\" type=\"password\" autocomplete=\"off\" autocapitalize=\"off\" spellcheck=\"false\" placeholder=\"Paste your API key\">\n      <button class=\"btn\" id=\"tfKeySave\">Save key</button>\n      <div id=\"tfKeyMsg\"></div>\n    </div>"
     + '<div id="tfKeyHave" class="small muted hide" style="margin-top:8px">FF Scouter key saved · <span id="tfKeyShow"></span> · <a href="#" id="tfKeyChange">Change</a> · <a href="#" id="tfKeyDel" style="color:#fca5a5">Remove</a></div>'
     + '<div class="cp-lk"><div class="small"><b>🔑 Chain Pal key</b> · used by the 🎃 treat haul valuer and the ready-to-use icons.</div>'
-    + '<div class="small muted" style="margin:4px 0">Access needed (a <b>Custom</b> key with just these ticked, or a Full key):<br>\u2022 <b>User:</b> basic, profile, cooldowns, refills, stocks, log<br>\u2022 <b>Faction:</b> basic, chain, members<br>\u2022 <b>Torn:</b> items, bounties, stocks, logtypes<br>Tap <b>Create key</b> to open Torn\u2019s form with all of this already filled in, tap Create, then paste the key here.</div>'
-    + '<div class="cp-lk-row"><input id="cpLimKey" type="password" maxlength="16" placeholder="16-character key" autocomplete="off"><button id="cpLimSave">Save</button><a class="cp-mk" href="https://www.torn.com/preferences.php#tab=api?step=addNewKey&title=Chain%20Pal&user=basic,profile,cooldowns,refills,stocks,log&faction=basic,chain,members&torn=items,bounties,stocks,logtypes" target="_blank" rel="noopener">\u2795 Create key</a></div>'
+    + '<div class="small muted" style="margin:4px 0">Access needed (a <b>Custom</b> key with just these ticked, or a Full key):<br>\u2022 <b>User:</b> basic, profile, cooldowns, refills, stocks, perks, log<br>\u2022 <b>Faction:</b> basic, chain, members<br>\u2022 <b>Torn:</b> items, bounties, stocks, logtypes<br>Tap <b>Create key</b> to open Torn\u2019s form with all of this already filled in, tap Create, then paste the key here.</div>'
+    + '<div class="cp-lk-row"><input id="cpLimKey" type="password" maxlength="16" placeholder="16-character key" autocomplete="off"><button id="cpLimSave">Save</button><a class="cp-mk" href="https://www.torn.com/preferences.php#tab=api?step=addNewKey&title=Chain%20Pal&user=basic,profile,cooldowns,refills,stocks,perks,log&faction=basic,chain,members&torn=items,bounties,stocks,logtypes" target="_blank" rel="noopener">\u2795 Create key</a></div>'
     + '<div id="cpLimHave" class="small muted hide">Chain Pal key saved · <span id="cpLimShow"></span> · <a href="#" id="cpLimDel" style="color:#fca5a5">Remove</a></div><div id="cpLimMsg" class="small"></div></div>'
     + '<div id="cpMe" class="small muted" style="margin-top:8px"></div>'
     + '<div class="small muted" style="margin-top:10px">Your keys stay in your userscript storage. They\u2019re only sent to Torn and FF Scouter, never to the Chain Watch server. Once a day Chain Pal tells the Chain Watch server your Torn name, ID and faction (so its author can see who uses it). The bounty / status-check key lives in Targets → 🔑 Torn key for bounties.</div>'
@@ -1431,6 +1431,16 @@
   //  cooldowns / refill / McSmoogle: every 15 min (every 2 min on the items page, and once when a cooldown runs out)
   //  job points: every 30 min (every 2 min on your job page); not at all once all 100 are used, until 00:00 TCT
   //  newsletter: not at all until the next one is due (3 months after your last claim); then every 6 h (every 2 min on the messages page)
+  // your maximum booster cooldown: 24h plus any perks that add to it (read from your perks once a day)
+  function boostCap(){ return 86400 + (RDY.capOk ? (RDY.capAdd || 0) : 0) }
+  function perkCap(k){
+    try { var c = JSON.parse(store("cp_bcap") || "null"); if (c && Date.now() - c.at < 86400000){ RDY.capOk = c.ok; RDY.capAdd = c.add; return Promise.resolve() } } catch(e){}
+    return torn("user/?selections=perks", k).then(function(d){
+      var add = 0;
+      Object.keys(d).forEach(function(g){ if (Array.isArray(d[g])) d[g].forEach(function(t){ t = String(t); if (/booster/i.test(t) && /cooldown/i.test(t)){ var m = t.match(/(\d+(?:\.\d+)?)\s*(hours?|hrs?|h)\b/i); if (m) add += Number(m[1]) * 3600 } }) });
+      RDY.capOk = true; RDY.capAdd = add; store("cp_bcap", JSON.stringify({ at: Date.now(), ok: true, add: add }));
+    }).catch(function(){ RDY.capOk = false; store("cp_bcap", JSON.stringify({ at: Date.now(), ok: false, add: 0 })) });
+  }
   function rdySave(){ try { store("cp_rdy", JSON.stringify({ cd: RDY.cd, cdAt: RDY.cdAt, ref: RDY.ref, stk: RDY.stk, jp: RDY.jp, jpAt: RDY.jpAt || 0, jpDay: RDY.jpDay || 0, news: RDY.news, newsAt: RDY.newsAt || 0 })) } catch(e){} }
   function rdyRestore(){
     try { var c = JSON.parse(store("cp_rdy") || "null"); if (!c) return;
@@ -1456,14 +1466,14 @@
     var needNews = !!lk && (force || !RDY.news || (newsDue && (newsAge > 6 * 60 * MIN || (onPage(/messages\.php/i) && newsAge > 2 * MIN))));
     if (!needUser && !needJob && !needNews){ rdyDraw(); return }
     RDY.busy = true; RDY.err = ""; RDY.logErr = "";
-    var a = !needUser ? Promise.resolve() : Promise.all([torn("user/?selections=cooldowns,refills,stocks", k), mcsId(k).catch(function(){ return 0 })]).then(function(r){
+    var a = !needUser ? Promise.resolve() : Promise.all([torn("user/?selections=cooldowns,refills,stocks", k), mcsId(k).catch(function(){ return 0 }), perkCap(k)]).then(function(r){
       var d = r[0], id = r[1]; RDY.cd = d.cooldowns || null; RDY.cdAt = Date.now(); RDY.ref = d.refills || null;
       var mine = null, st = d.stocks || {}; Object.keys(st).forEach(function(k){ var x = st[k] || {}; if (id && Number(x.stock_id || k) === id) mine = x });
       RDY.stk = { owned: !!mine, div: mine && (mine.dividend || (mine.benefit && mine.benefit.ready != null ? mine.benefit : null)) || null };
     }).catch(function(e){ RDY.err = tornWhy(e.message); RDY.wait = Date.now() + (/\(5\)/.test(e.message) ? 5 : 2) * 60000 });
     var b = !(needJob || needNews) ? Promise.resolve() : logTypes(lk).then(function(t){
       var p = [];
-      if (needJob) p.push(t.job.length ? torn("v2/user/log?log=" + t.job.join(",") + "&from=" + mid + "&limit=100", lk).then(function(d){ RDY.jp = jpUsed(d.log || []); RDY.jpAt = Date.now(); RDY.jpDay = mid }) : Promise.resolve(RDY.jp = null));
+      if (needJob) p.push(t.job.length ? torn("v2/user/log?log=" + t.job.join(",") + "&from=" + mid + "&limit=100", lk).then(function(d){ var u = jpUsed(d.log || []); if (RDY.jpDay === mid && Date.now() - (RDY.jpLocal || 0) < 5 * 60000) u = Math.max(u, RDY.jp || 0); RDY.jp = u; RDY.jpAt = Date.now(); RDY.jpDay = mid }) : Promise.resolve(RDY.jp = null));
       if (needNews) p.push(t.news.length ? torn("v2/user/log?log=" + t.news.join(",") + "&from=" + (Math.floor(Date.now() / 1000) - 95 * 86400) + "&limit=20", lk).then(function(d){ var l = d.log || []; RDY.news = { last: l.reduce(function(m, x){ return Math.max(m, Number(x.timestamp) || 0) }, (RDY.news && RDY.news.last) || 0) }; RDY.newsAt = Date.now() }) : Promise.resolve(RDY.news = null));
       return Promise.all(p);
     }).catch(function(e){ RDY.logErr = tornWhy(e.message); RDY.wait = Date.now() + (/\(5\)/.test(e.message) ? 5 : 2) * 60000 });
@@ -1484,7 +1494,11 @@
       var left = (Number(cd[key]) || 0) - el;
       rdySet(id, left > 0 ? "no" : "ok", left > 0 ? rdyShort(left) : "✓", name + (left > 0 ? " cooldown: " + rdyShort(left) + " left" : ": ready to use"));
     };
-    cdIcon("cpIcDrug", "drug", "Drug"); cdIcon("cpIcBoost", "booster", "Booster");
+    cdIcon("cpIcDrug", "drug", "Drug");
+    // boosters can be used until the cooldown reaches your maximum (24h + perks), so show the time until it drops below that
+    if (!cd) rdySet("cpIcBoost", "unk", "?", "Booster cooldown: " + (RDY.err || "loading…"));
+    else { var bl = (Number(cd.booster) || 0) - el, cap = boostCap(), wait = bl - cap;
+      rdySet("cpIcBoost", wait > 0 ? "no" : "ok", wait > 0 ? rdyShort(wait) : "\u2713", (wait > 0 ? "Booster: usable again in " + rdyShort(wait) : "Booster: ready to use") + " (cooldown " + (bl > 0 ? rdyShort(bl) : "0") + " of your " + Math.round(cap / 3600) + "h maximum" + (RDY.capOk ? "" : " \u2013 assumed: add perks access to your key (\u2795 Create key) so Chain Pal can read your real maximum") + ")") }
     var r = RDY.ref;
     if (!r) rdySet("cpIcRef", "unk", "?", "Points refill: " + (RDY.err || "loading…"));
     else { var used = !!(r.energy_refill_used != null ? r.energy_refill_used : r.energy) && (RDY.cdAt || 0) / 1000 >= tctMidnight(); rdySet("cpIcRef", used ? "no" : "ok", used ? "used" : "✓", used ? "Points refill: used today (resets 00:00 TCT)" : "Points refill: available") }
@@ -1511,7 +1525,22 @@
   // ---------------------------------------------------------------------
   var JS_ENERGY = ["reinvigorating therapy", "coffee break", "pub lunch", "free meals", "overpowered", "early riser"];
   function jsOn(){ if (store("cp_jsfilter") === "0") return false; var d = new Date(); return (d.getUTCMonth() === 9 && d.getUTCDate() >= 24) || (d.getUTCMonth() === 10 && d.getUTCDate() === 1) }
+  // "You have exchanged 20 job points for 100 energy." on the job page: count those points straight away (no need to ask Torn)
+  function jpSeen(){
+    Array.prototype.forEach.call(document.querySelectorAll("div,p,span,li"), function(el){
+      if (el.closest(".cpal") || el.getAttribute("data-cpjp")) return;
+      var t = String(el.textContent || ""); if (t.length > 200) return;
+      var m = t.match(/You have exchanged\s+([\d,]+)\s+job points?/i); if (!m) return;
+      if (Array.prototype.some.call(el.children, function(c){ return /You have exchanged/i.test(c.textContent || "") })) return; // the innermost box holding the message
+      el.setAttribute("data-cpjp", "1");
+      var n = Number(m[1].replace(/,/g, "")) || 0, mid = tctMidnight(); if (!n) return;
+      rdyRestore();
+      if (RDY.jpDay !== mid){ RDY.jp = 0; RDY.jpDay = mid }
+      RDY.jp = Math.min(100, (RDY.jp || 0) + n); RDY.jpAt = RDY.jpLocal = Date.now(); rdySave(); rdyDraw();
+    });
+  }
   function jsFilter(){
+    try { jpSeen() } catch(e){}
     var on = jsOn();
     // find a special that gives energy (e.g. "Reinvigorating Therapy"); its row's siblings are the other specials
     var anchor = null;
