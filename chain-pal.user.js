@@ -1086,7 +1086,7 @@
     S.fbBusy = true;
     var done = function(){ S.fbBusy = false; var l = S.fb && S.fb.exp ? (S.fb.exp - Date.now()) / 1000 : null; S.fbNext = Date.now() + (l != null && l > 0 && l <= AL_MAX + 20 ? 5000 : l != null && l > 0 ? Math.min(30000, Math.max(5000, (l - AL_MAX - 15) * 1000)) : 30000) };
     var p;
-    if (false && CP_FACTIONS.indexOf(S.f) >= 0) p = api({ op: "chain", pid: S.member ? S.member.pid : 0 }).then(function(j){
+    if (CP_FACTIONS.indexOf(S.f) >= 0) p = api({ op: "chain", pid: S.member ? S.member.pid : 0 }).then(function(j){
       var c = j.chain || {}, sk = (j.now || Date.now() / 1000) - Date.now() / 1000;
       var stale = c.staleSince && c.src !== "page" && j.now - c.staleSince >= 20;
       S.fb = { n: c.current || 0, exp: c.expiry && c.current ? (c.expiry - sk) * 1000 : 0, stale: !!stale, src: c.src === "page" ? "Torn pages" : "Chain Watch" };
@@ -1542,9 +1542,10 @@
       RDY.capOk = true; RDY.capAdd = add; store("cp_bcap", JSON.stringify({ at: Date.now(), ok: true, add: add }));
     }).catch(function(){ RDY.capOk = false; store("cp_bcap", JSON.stringify({ at: Date.now(), ok: false, add: 0 })) });
   }
-  function rdySave(){ try { store("cp_rdy", JSON.stringify({ cd: RDY.cd, cdAt: RDY.cdAt, ref: RDY.ref, stk: RDY.stk, jpv: 2, jp: RDY.jp, jpAt: RDY.jpAt || 0, jpDay: RDY.jpDay || 0, jpLog: RDY.jpLog || 0, jpTs: RDY.jpTs || 0, jpPage: RDY.jpPage || 0, jpWhat: RDY.jpWhat || "", news: RDY.news, newsAt: RDY.newsAt || 0 })) } catch(e){} }
+  function rdySave(){ try { store("cp_rdy", JSON.stringify({ cd: RDY.cd, cdAt: RDY.cdAt, ref: RDY.ref, stk: RDY.stk, jpv: 2, refSeen: RDY.refSeen || null, jp: RDY.jp, jpAt: RDY.jpAt || 0, jpDay: RDY.jpDay || 0, jpLog: RDY.jpLog || 0, jpTs: RDY.jpTs || 0, jpPage: RDY.jpPage || 0, jpWhat: RDY.jpWhat || "", news: RDY.news, newsAt: RDY.newsAt || 0 })) } catch(e){} }
   function rdyRestore(){
     try { var c = JSON.parse(store("cp_rdy") || "null"); if (!c) return;
+      if (c.refSeen && (!RDY.refSeen || c.refSeen.at > RDY.refSeen.at)) RDY.refSeen = c.refSeen;
       if ((c.cdAt || 0) > (RDY.cdAt || 0)){ RDY.cd = c.cd; RDY.cdAt = c.cdAt; RDY.ref = c.ref; RDY.stk = c.stk }
       if (c.jpv === 2 && (c.jpAt || 0) > (RDY.jpAt || 0)){ RDY.jp = c.jp; RDY.jpAt = c.jpAt; RDY.jpDay = c.jpDay; RDY.jpLog = c.jpLog || 0; RDY.jpTs = c.jpTs || 0; RDY.jpPage = c.jpPage || 0; RDY.jpWhat = c.jpWhat || "" }
       if ((c.newsAt || 0) > (RDY.newsAt || 0)){ RDY.news = c.news; RDY.newsAt = c.newsAt }
@@ -1612,7 +1613,8 @@
       rdySet("cpIcBoost", wait > 0 ? "no" : "ok", wait > 0 ? rdyShort(wait) : "\u2713", (wait > 0 ? "Booster: usable again in " + rdyShort(wait) : "Booster: ready to use") + " (cooldown " + (bl > 0 ? rdyShort(bl) : "0") + " of your " + Math.round(cap / 3600) + "h maximum" + (RDY.capOk || pageBoostMax() ? "" : " \u2013 assumed: tap Torn\u2019s booster icon once, or add perks access to your key (\u2795 Create key), so Chain Pal can read your real maximum") + ")") }
     var r = RDY.ref;
     if (!r) rdySet("cpIcRef", "unk", "?", "Points refill: " + (RDY.err || "loading…"));
-    else { var used = !!(r.energy_refill_used != null ? r.energy_refill_used : r.energy) && (RDY.cdAt || 0) / 1000 >= tctMidnight(); rdySet("cpIcRef", used ? "no" : "ok", used ? "used" : "✓", used ? "Points refill: used today (resets 00:00 TCT)" : "Points refill: available") }
+    else { var used = !!(r.energy_refill_used != null ? r.energy_refill_used : r.energy) && (RDY.cdAt || 0) / 1000 >= tctMidnight();
+      if (RDY.refSeen && RDY.refSeen.at > (RDY.cdAt || 0) && RDY.refSeen.at / 1000 >= tctMidnight()) used = RDY.refSeen.used; /* what the Points page showed is newer than Torn's last answer */ rdySet("cpIcRef", used ? "no" : "ok", used ? "used" : "✓", used ? "Points refill: used today (resets 00:00 TCT)" : "Points refill: available") }
     var s = RDY.stk;
     if (!s) rdySet("cpIcStk", "unk", "?", "McSmoogle: " + (RDY.err || "loading…"));
     else if (!s.owned || !s.div) rdySet("cpIcStk", "no", "—", s.owned ? "McSmoogle: you don't hold enough shares for the 100 points benefit" : "McSmoogle: you don't own the benefit block (100 points every 7 days)");
@@ -1673,7 +1675,25 @@
     RDY.jpPage = (RDY.jpPage || 0) + n; RDY.jp = Math.min(100, Math.max(RDY.jpLog || 0, RDY.jpPage)); RDY.jpAt = Date.now(); rdySave(); rdyDraw();
   }
 
+  // the Points page: "Refill Energy" shows a countdown (e.g. 16:41:03) once today's refill is used, and its price while it isn't
+  function refSeen(){
+    if (!/points\.php/i.test(location.pathname)) return;
+    var head = null;
+    Array.prototype.some.call(document.querySelectorAll("div,span,h1,h2,h3,h4,h5,p,a,li"), function(el){ if (!el.children.length && /^\s*refill energy\s*$/i.test(el.textContent || "") && !el.closest(".cpal")){ head = el; return true } return false });
+    if (!head) return;
+    var used = null;
+    for (var box = head.parentElement, i = 0; box && i < 5 && used == null; box = box.parentElement, i++){
+      var t = String(box.textContent || ""); if (t.length > 400) break;
+      if (/refill nerve|refill tokens/i.test(t)) break; // gone past this card
+      if (/\d{1,2}:\d\d:\d\d/.test(t)) used = true;          // a countdown: used today
+      else if (/\d+\s*$/.test(t.trim())) used = false;        // its points price: still available
+    }
+    if (used == null) return;
+    rdyRestore();
+    if (!RDY.refSeen || RDY.refSeen.used !== used || Date.now() - RDY.refSeen.at > 60000){ RDY.refSeen = { used: used, at: Date.now() }; rdySave(); rdyDraw() }
+  }
   function jsFilter(){
+    try { refSeen() } catch(e){}
     try { jpSeen() } catch(e){}
     var on = jsOn();
     // find a special that gives energy (e.g. "Reinvigorating Therapy"); its row's siblings are the other specials
@@ -2727,7 +2747,7 @@
   var cpMdErr = 0; setInterval(function(){ try { mdTick() } catch(e){ if (!cpMdErr++) cpErr("quick med", e) } }, 2000);
   var cpJsErr = 0; setInterval(function(){ try { jsFilter() } catch(e){ if (!cpJsErr++) cpErr("job page", e) } }, 2000);
   // Chain Pal running counts as online time on the Chain Watch report
-  // presence pings switched off with chain watching (1 Nov 2026)
+  setInterval(function(){ if (S.member) api({ op: "here", pid: S.member.pid }).catch(function(){}) }, 120000);
   [mdApply, icApply, cwApply, cpWatch, cpBig, alRender, sndButton, clockTick, rdyLoad, rdyDraw].forEach(function(fn){ try { fn() } catch(e){ cpErr(fn.name || "start", e) } });
   var cpKeyUi = function(){ try { tfShowKey() } catch(e){ cpErr("keys", e) } };
   try { cpKeyUi(); cpIdent().then(function(m){ cpKeyUi(); cpCheckIn(m) }, function(e){ cpErr("identity", e); cpKeyUi() }) } catch(e){ cpErr("identity", e); cpKeyUi() }
