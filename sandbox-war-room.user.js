@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Sandbox War Room 🧪
 // @namespace    jay-torn-war-script-sandbox
-// @version      1.99.45
+// @version      1.99.46
 // @downloadURL  https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @updateURL    https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @description  [SANDBOX - test build, not for general use] Enemy hospital timers, quick attack links, and a chain timeout alert overlay for Torn faction war pages. Works in Tampermonkey (Firefox) and Torn PDA.
@@ -582,7 +582,7 @@ const __twsOuter = (() => {
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.45';
+  const SCRIPT_VERSION = '1.99.46';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -755,7 +755,7 @@ const __twsOuter = (() => {
     { key: 'copyIcons', group: 'Roster actions', label: '⧉ Copy / send-to-faction-chat icon (Enemy tabs)' },
     { key: 'attackSos', group: 'Roster actions', label: '🆘 SOS button on the attack page', hint: 'Small red button in the Faction chat header (attack page, chat open) that puts "HELP NEEDED!" plus the target\u2019s name, level, estimated stats and attack link into faction chat (or copies it if chat isn\u2019t open).' },
     { key: 'onlineHitNow', group: 'Roster actions', label: 'Copy adds "ONLINE HIT NOW!" for targets who are online and out of hospital', requires: 'copyIcons' },
-    { key: 'chatCalls', group: 'Roster actions', label: '\u260e Called: C next to targets called in Faction chat', hint: 'While Faction chat is open, a message naming an enemy as a call (\u201ccalled NAME\u201d, \u201cNAME IN 7:48\u201d, or just their name) puts a C next to them in the Target tab and the Attacks log. Tap the C to see who called them and how long was left on their hospital timer.' },
+    { key: 'chatCalls', group: 'Roster actions', label: '\u260e Called: C next to targets called in Faction chat', hint: 'While Faction chat is open, a message naming an enemy as a call (\u201ccalled NAME\u201d, \u201cNAME IN 7:48\u201d, or just their name) puts a C next to them in the Target tab and the Attacks log (only with 6:10 or less left on their hospital timer; it clears once they\u2019re hospitalised again). Tap the C to see who called them and how long was left on their hospital timer.' },
     { key: 'atkEtaCopy', group: 'Roster actions', label: 'Tap a hospitalised target\u2019s ATK to send its timer to chat', hint: 'e.g. \u201cKRAKEN IN 7:48\u201d \u2013 the time left on their hospital timer.' },
     { key: 'bountyIcons', group: 'Roster actions', label: '💰 Bounty icon on the Home tab', hint: 'Opens that faction mate\u2019s "place a bounty" page.' },
     { key: 'bountyAutofill', group: 'Roster actions', label: '💰 Auto-fill the bounty amount from their estimated stats', hint: 'Amounts are set in the 💰 Bounty amounts menu at the top of this tab.', requires: 'bountyIcons' },
@@ -5515,19 +5515,29 @@ const __twsOuter = (() => {
   const CALLS_STORE = 'tws_chat_calls';
   const CALL_TTL_MS = 10 * 60 * 1000;      // a call with no timer lasts 10 minutes
   const CALL_AFTER_OUT_MS = 2 * 60 * 1000; // a timed call lasts until 2 min after they're out
+  const CALL_MAX_SECS = 6 * 60 + 10;        // only counts with 6:10 or less left on their hospital timer
   let chatCalls = {};
   let chatCallsVer = 0;
   try { chatCalls = JSON.parse(getCfg(CALLS_STORE, '{}')) || {}; } catch (e) { chatCalls = {}; }
   const callMsgSeen = new WeakSet();
   const callBoxSeen = new WeakSet();
   const callListOf = new WeakMap();
+  // The called target has been put in hospital since the call (a new hospital stay, or a hit in the Attacks log).
+  function callKilled(id, c) {
+    const outAt = c.at + (c.secs || 0) * 1000;
+    const m = enemyMembers.find((x) => String(x.id) === String(id));
+    if (m && m.state === 'Hospital' && m.until && m.until * 1000 > outAt + 5000) return true;
+    try {
+      return loadAtkLog().some((x) => String(x.dId) === String(id) && x.e * 1000 > c.at && isHospHit({ result: x.r }));
+    } catch (e) { return false; }
+  }
   function callsPrune() {
     const now = Date.now();
     let changed = false;
     Object.keys(chatCalls).forEach((id) => {
       const c = chatCalls[id];
-      const end = c.secs != null ? c.at + c.secs * 1000 + CALL_AFTER_OUT_MS : c.at + CALL_TTL_MS;
-      if (!c || now > end) { delete chatCalls[id]; changed = true; }
+      const end = c && (c.secs ? c.at + c.secs * 1000 + CALL_AFTER_OUT_MS : c.at + CALL_TTL_MS);
+      if (!c || now > end || callKilled(id, c)) { delete chatCalls[id]; changed = true; }
     });
     return changed;
   }
@@ -5535,8 +5545,8 @@ const __twsOuter = (() => {
     if (!featureOn('chatCalls')) return null;
     const c = chatCalls[String(id)];
     if (!c) return null;
-    const end = c.secs != null ? c.at + c.secs * 1000 + CALL_AFTER_OUT_MS : c.at + CALL_TTL_MS;
-    return Date.now() > end ? null : c;
+    const end = c.secs ? c.at + c.secs * 1000 + CALL_AFTER_OUT_MS : c.at + CALL_TTL_MS;
+    return (Date.now() > end || callKilled(id, c)) ? null : c;
   }
   function callBadgeHtml(id) {
     const c = callOf(id);
@@ -5612,6 +5622,7 @@ const __twsOuter = (() => {
     if (!isCall) return null;
     let secs = timeM ? Number(timeM[1]) * 60 + Number(timeM[2]) : null;
     if (secs == null && hit.state === 'Hospital' && hit.until) secs = Math.max(0, Math.round(hit.until - Date.now() / 1000));
+    if (secs != null && secs > CALL_MAX_SECS) return null; // too early to call: over 6:10 left
     return { id: String(hit.id), name: hit.name, by: sender.name, secs };
   }
   function scanChatCalls() {
