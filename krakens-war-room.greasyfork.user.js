@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Krakens War Room 🐙
 // @namespace    jay-torn-war-script
-// @version      1.99.49
+// @version      1.99.51
 // @description  Ranked-war companion for Torn: live enemy roster with hospital timers, chain timers & alerts, attack/retal links, targets, attacks log, battle-stat estimates and a PC wide mode. Works in Tampermonkey and Torn PDA. 2-hour free trial, then 1 Xanax = 7 days.
 // @author       -TheKraken- [3616083]
 // @copyright    2026, -TheKraken- [3616083] - All rights reserved
@@ -584,7 +584,7 @@ const __twsOuter = (() => {
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.49';
+  const SCRIPT_VERSION = '1.99.51';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -4817,6 +4817,12 @@ const __twsOuter = (() => {
     if (!onFactionPage()) {
       return { mode: 'home', enemyId: null };
     }
+    // Only the faction's War tab has a war roster. Elsewhere (e.g. the news
+    // feed, where a territory assault names the same faction many times) the
+    // links aren't a roster, and counting them made the enemy come and go.
+    if (!/war/i.test(location.hash || '')) {
+      return { mode: 'home', enemyId: null };
+    }
 
     // Otherwise: scan the current page's own content for a war roster,
     // requiring enough repeated links to the same other faction to be
@@ -5682,6 +5688,14 @@ const __twsOuter = (() => {
     if (secs > CALL_MAX_SECS) return null;  // too early to call: over 6:10 left
     return { id: String(hit.id), name: hit.name, by: sender.name, secs, msg: String(text).replace(/\s+/g, ' ').trim().slice(0, 200) };
   }
+  // Is this chat sender you? (your name from your own faction's list)
+  function callIsMe(by) {
+    try {
+      const me = myIdCached();
+      const m = me && homeMembers.find((x) => String(x.id) === String(me));
+      return !!m && callNorm(m.name) === callNorm(by);
+    } catch (e) { return false; }
+  }
   function scanChatCalls() {
     if (!featureOn('chatCalls') || !enemyMembers.length) return;
     let boxes = [];
@@ -5698,6 +5712,15 @@ const __twsOuter = (() => {
         callMsgSeen.add(m);
         const c = callParse(m);
         if (!c) return;
+        const prev = callOf(c.id);
+        if (prev && callNorm(prev.by) !== callNorm(c.by)) {
+          // Already called by someone else: the first call stands. Tell the late caller if that's you.
+          if (callIsMe(c.by)) {
+            const ago = Math.max(0, Math.round((Date.now() - prev.at) / 1000));
+            showToast(`\u274c BAD CALL: ${prev.name || c.name} was already called by ${prev.by} ${ago < 60 ? `${ago}s` : `${Math.floor(ago / 60)}m ${ago % 60}s`} ago${prev.secs ? ` (with ${fmtDuration(prev.secs)} to go)` : ''}${prev.msg ? ` \u2013 \u201c${prev.msg}\u201d` : ''}`, { error: true, duration: 9000 });
+          }
+          return;
+        }
         chatCalls[c.id] = { by: c.by, name: c.name, at: Date.now(), secs: c.secs, msg: c.msg };
         changed = true;
       });
