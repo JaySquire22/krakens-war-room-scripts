@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Sandbox War Room 🧪
 // @namespace    jay-torn-war-script-sandbox
-// @version      1.99.42
+// @version      1.99.43
 // @downloadURL  https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @updateURL    https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @description  [SANDBOX - test build, not for general use] Enemy hospital timers, quick attack links, and a chain timeout alert overlay for Torn faction war pages. Works in Tampermonkey (Firefox) and Torn PDA.
@@ -582,7 +582,7 @@ const __twsOuter = (() => {
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.42';
+  const SCRIPT_VERSION = '1.99.43';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -755,6 +755,7 @@ const __twsOuter = (() => {
     { key: 'copyIcons', group: 'Roster actions', label: '⧉ Copy / send-to-faction-chat icon (Enemy tabs)' },
     { key: 'attackSos', group: 'Roster actions', label: '🆘 SOS button on the attack page', hint: 'Small red button in the Faction chat header (attack page, chat open) that puts "HELP NEEDED!" plus the target\u2019s name, level, estimated stats and attack link into faction chat (or copies it if chat isn\u2019t open).' },
     { key: 'onlineHitNow', group: 'Roster actions', label: 'Copy adds "ONLINE HIT NOW!" for targets who are online and out of hospital', requires: 'copyIcons' },
+    { key: 'chatCalls', group: 'Roster actions', label: '\u260e Called: C next to targets called in Faction chat', hint: 'While Faction chat is open, a message naming an enemy as a call (\u201ccalled NAME\u201d, \u201cNAME IN 7:48\u201d, or just their name) puts a C next to them in the Target tab and the Attacks log. Tap the C to see who called them and how long was left on their hospital timer.' },
     { key: 'atkEtaCopy', group: 'Roster actions', label: 'Tap a hospitalised target\u2019s ATK to send its timer to chat', hint: 'e.g. \u201cKRAKEN IN 7:48\u201d \u2013 the time left on their hospital timer.' },
     { key: 'bountyIcons', group: 'Roster actions', label: '💰 Bounty icon on the Home tab', hint: 'Opens that faction mate\u2019s "place a bounty" page.' },
     { key: 'bountyAutofill', group: 'Roster actions', label: '💰 Auto-fill the bounty amount from their estimated stats', hint: 'Amounts are set in the 💰 Bounty amounts menu at the top of this tab.', requires: 'bountyIcons' },
@@ -2070,7 +2071,7 @@ const __twsOuter = (() => {
     const nowS = Date.now() / 1000;
     const list = atkLogList();
     const retalIds = list.filter((x) => atkLogIsRetal(x, ownId, nowS)).map((x) => x.id).join(',');
-    return [atkLogFilter, list.length, list[0] ? list[0].id : '', atkLogSource, atkLogError, retalIds, ownId, enemyFactionId || '', atkLogStatsVer].join('|');
+    return [atkLogFilter, list.length, list[0] ? list[0].id : '', atkLogSource, atkLogError, retalIds, ownId, enemyFactionId || '', atkLogStatsVer, chatCallsVer].join('|');
   }
 
   // The Attacks tab's content (goes where the roster rows normally are).
@@ -2108,7 +2109,7 @@ const __twsOuter = (() => {
       const cls = String(fac) === ownId ? 'tws-log-own' : (enemyId && String(fac) === enemyId) ? 'tws-log-enemy' : 'tws-log-other';
       if (!id) return `<span class="tws-log-other">Someone</span>`;
       const label = escHtml(n || names[id] || `[${id}]`);
-      return `<a class="${cls}" target="_blank" href="https://www.torn.com/profiles.php?XID=${id}">${label}</a>${statOf(id)}`;
+      return `<a class="${cls}" target="_blank" href="https://www.torn.com/profiles.php?XID=${id}">${label}</a>${callBadgeHtml(id)}${statOf(id)}`;
     };
     const rows = list.map((x) => {
       const dir = String(x.aF) === ownId ? 'out' : String(x.dF) === ownId ? 'in' : 'other';
@@ -5504,6 +5505,154 @@ const __twsOuter = (() => {
   // .value assignment) for React's controlled textarea to actually notice
   // the change.
   // ---------------------------------------------------------------------
+  // ---------------------------------------------------------------------
+  // CALLED: reads the Faction chat while it's open on the page. When a
+  // message names an enemy (or links their profile) as a call, a C shows next
+  // to them in the Target tab and the Attacks log; tap it to see who called
+  // them and how long was left on their hospital timer at the time.
+  // Only reads what's already on screen: no requests are made.
+  // ---------------------------------------------------------------------
+  const CALLS_STORE = 'tws_chat_calls';
+  const CALL_TTL_MS = 10 * 60 * 1000;      // a call with no timer lasts 10 minutes
+  const CALL_AFTER_OUT_MS = 2 * 60 * 1000; // a timed call lasts until 2 min after they're out
+  let chatCalls = {};
+  let chatCallsVer = 0;
+  try { chatCalls = JSON.parse(getCfg(CALLS_STORE, '{}')) || {}; } catch (e) { chatCalls = {}; }
+  const callMsgSeen = new WeakSet();
+  const callBoxSeen = new WeakSet();
+  const callListOf = new WeakMap();
+  function callsPrune() {
+    const now = Date.now();
+    let changed = false;
+    Object.keys(chatCalls).forEach((id) => {
+      const c = chatCalls[id];
+      const end = c.secs != null ? c.at + c.secs * 1000 + CALL_AFTER_OUT_MS : c.at + CALL_TTL_MS;
+      if (!c || now > end) { delete chatCalls[id]; changed = true; }
+    });
+    return changed;
+  }
+  function callOf(id) {
+    if (!featureOn('chatCalls')) return null;
+    const c = chatCalls[String(id)];
+    if (!c) return null;
+    const end = c.secs != null ? c.at + c.secs * 1000 + CALL_AFTER_OUT_MS : c.at + CALL_TTL_MS;
+    return Date.now() > end ? null : c;
+  }
+  function callBadgeHtml(id) {
+    const c = callOf(id);
+    return c ? ` <span class="tws-call" data-call-id="${escHtml(String(id))}" title="Called by ${escHtml(c.by)}">C</span>` : '';
+  }
+  function callDetailText(id) {
+    const c = callOf(id);
+    if (!c) return '';
+    const ago = Math.max(0, Math.round((Date.now() - c.at) / 1000));
+    const agoTxt = ago < 60 ? `${ago}s ago` : `${Math.floor(ago / 60)}m ${ago % 60}s ago`;
+    const timer = c.secs != null && c.secs > 0
+      ? `${fmtDuration(c.secs)} left on their hospital timer when called`
+      : 'they were out of hospital when called';
+    return `☎ ${c.name || 'Target'} called by ${c.by} ${agoTxt} – ${timer}.`;
+  }
+  // The scrolling message list inside a chat box (found once, then remembered).
+  function callMsgList(box) {
+    const known = callListOf.get(box);
+    if (known && box.contains(known)) return known;
+    let best = null;
+    box.querySelectorAll('div, ul, ol').forEach((el) => {
+      if (best || el.querySelector('textarea')) return;
+      try {
+        const oy = getComputedStyle(el).overflowY;
+        if ((oy === 'auto' || oy === 'scroll') && el.children.length) best = el;
+      } catch (e) { /* ignore */ }
+    });
+    if (best) callListOf.set(box, best);
+    return best;
+  }
+  function callMessages(list) {
+    let node = list;
+    for (let i = 0; i < 4 && node.children.length === 1; i++) node = node.children[0];
+    let kids = Array.from(node.children);
+    // Messages grouped (e.g. by day or sender): look one level further in.
+    if (kids.length && kids.length <= 5 && kids.every((k) => k.children.length > 3)) kids = kids.flatMap((k) => Array.from(k.children));
+    return kids;
+  }
+  // Who sent a message: its sender element, else its first profile link, else "Name:" at the start.
+  function callSender(msg) {
+    const s = msg.querySelector('[class*="sender"], [class*="author"], [class*="name___"]');
+    let t = s ? s.textContent : '';
+    if (!t) { const a = msg.querySelector('a[href*="XID="]'); t = a ? a.textContent : ''; }
+    if (!t) { const m = (msg.innerText || '').match(/^\s*([^:\n]{2,24}):/); t = m ? m[1] : ''; }
+    return { el: s, name: String(t || '').replace(/[:\s]+$/, '').trim() || 'Someone' };
+  }
+  function callParse(msg) {
+    const full = String(msg.innerText || msg.textContent || '');
+    if (!full.trim()) return null;
+    const sender = callSender(msg);
+    let text = full;
+    if (sender.el && sender.el.textContent) text = text.replace(sender.el.textContent, ' ');
+    const low = ` ${text.toLowerCase()} `;
+    // Who is mentioned: an enemy's profile link, or an enemy's (or target's) name as a whole word.
+    const pool = enemyMembers.length ? enemyMembers : [];
+    let hit = null;
+    msg.querySelectorAll('a[href*="XID="]').forEach((a) => {
+      if (hit) return;
+      const m = String(a.getAttribute('href') || '').match(/XID=(\d+)/i);
+      const em = m && pool.find((x) => String(x.id) === m[1]);
+      if (em && em.name !== sender.name) hit = em;
+    });
+    if (!hit) {
+      const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      hit = pool.find((x) => x.name && x.name.length >= 3 && x.name !== sender.name
+        && new RegExp(`(^|[^a-z0-9_-])${esc(x.name.toLowerCase())}($|[^a-z0-9_-])`).test(low)) || null;
+    }
+    if (!hit) return null;
+    // Counts as a call: "call/called/calling", War Room's own "NAME IN 7:48", or a message that is little more than the name.
+    const timeM = text.match(/\bin\s+(\d{1,2}):(\d{2})\b/i);
+    const leftover = low.replace(hit.name.toLowerCase(), ' ').replace(/https?:\S+/g, ' ').replace(/[^a-z]+/g, ' ').trim();
+    const isCall = /\bcall(ed|ing|s)?\b/i.test(text) || !!timeM || leftover.split(' ').filter(Boolean).length <= 2;
+    if (!isCall) return null;
+    let secs = timeM ? Number(timeM[1]) * 60 + Number(timeM[2]) : null;
+    if (secs == null && hit.state === 'Hospital' && hit.until) secs = Math.max(0, Math.round(hit.until - Date.now() / 1000));
+    return { id: String(hit.id), name: hit.name, by: sender.name, secs };
+  }
+  function scanChatCalls() {
+    if (!featureOn('chatCalls') || !enemyMembers.length) return;
+    let boxes = [];
+    try { boxes = sosFactionChatBoxes(document); } catch (e) { return; }
+    let changed = callsPrune();
+    boxes.forEach(({ box }) => {
+      const list = callMsgList(box);
+      if (!list) return;
+      const msgs = callMessages(list);
+      // The first look at a chat only notes what's already there (older messages aren't new calls).
+      if (!callBoxSeen.has(list)) { callBoxSeen.add(list); msgs.forEach((m) => callMsgSeen.add(m)); return; }
+      msgs.forEach((m) => {
+        if (callMsgSeen.has(m)) return;
+        callMsgSeen.add(m);
+        const c = callParse(m);
+        if (!c) return;
+        chatCalls[c.id] = { by: c.by, name: c.name, at: Date.now(), secs: c.secs };
+        changed = true;
+      });
+    });
+    if (changed) {
+      chatCallsVer++;
+      try { setCfg(CALLS_STORE, JSON.stringify(chatCalls)); } catch (e) { /* ignore */ }
+      try { atkLogSig = ''; } catch (e) { /* ignore */ }
+      safeRender();
+    }
+  }
+  function installChatCalls() {
+    if (IN_POPOUT_FRAME) return;
+    setInterval(() => { try { scanChatCalls(); } catch (e) { /* ignore */ } }, 1500);
+    document.addEventListener('click', (e) => {
+      const el = e.target && e.target.closest && e.target.closest('.tws-call[data-call-id]');
+      if (!el) return;
+      e.preventDefault(); e.stopPropagation();
+      const t = callDetailText(el.getAttribute('data-call-id'));
+      if (t) showToast(t);
+    }, true);
+  }
+
   function findFactionChatTextarea() {
     try {
       const found = sosFactionChatBoxes(document);
@@ -8940,6 +9089,7 @@ const __twsOuter = (() => {
     .tws-ffval { font-weight: bold; }
     .tws-name-flash { animation: tws-flash 1s infinite; }
     .tws-star { cursor: pointer; color: #555; font-size: 13px; }
+    .tws-call { display: inline-block; cursor: pointer; background: #b8860b; color: #111; font-weight: bold; font-size: 10px; line-height: 13px; padding: 0 4px; border-radius: 3px; margin-left: 3px; vertical-align: 1px; }
     .tws-star.tws-star-active { color: #ffd700; }
     .tws-star { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
     .tws-star[data-hold="1"] { transition: transform .5s linear, text-shadow .5s linear; display: inline-block; }
@@ -11394,7 +11544,7 @@ const __twsOuter = (() => {
       const profileUrl = `https://www.torn.com/profiles.php?XID=${m.id}`;
       return `
         <div class="tws-row">
-          <span class="tws-name" data-row-id="${m.id}">${ffDot}<a class="tws-name-link ${themeId === 'ff' ? '' : lastActionClass} ${flashClass}"${ffStyle} target="_blank" href="${profileUrl}">${m.name}</a> <small class="${themeId === 'ff' ? '' : lastActionClass}"${ffStyle}>(Lvl ${m.level})</small>${figureHtml}${bountyIconHtml}${copyIconHtml}${starHtml}${homeCardHtml}</span>
+          <span class="tws-name" data-row-id="${m.id}">${ffDot}<a class="tws-name-link ${themeId === 'ff' ? '' : lastActionClass} ${flashClass}"${ffStyle} target="_blank" href="${profileUrl}">${m.name}</a> <small class="${themeId === 'ff' ? '' : lastActionClass}"${ffStyle}>(Lvl ${m.level})</small>${viewSide === 'target' ? callBadgeHtml(m.id) : ''}${figureHtml}${bountyIconHtml}${copyIconHtml}${starHtml}${homeCardHtml}</span>
           <span class="tws-time ${statusClass}${flashClass ? ' tws-name-flash' : ''}${travelOn ? ' tws-travel-eta' : ''}" data-time-id="${m.id}"${travelOn ? ` data-travel-id="${m.id}" title="Tap for every travel method"` : ''}>${timeLabel}</span>
           ${actionHtml}
         </div>
@@ -12705,6 +12855,7 @@ const __twsOuter = (() => {
     initKrakenIntel(); // independent of the main panel's page gating below
     kiWatchPopoutFights(); // PC Mode: fights opened in a War Room pop-out, from any page
     installProfileAttack(); // profile Attack button always works (page + pop-out)
+    installChatCalls(); // C next to targets called in Faction chat
     bootPopoutIntel(); // Intel inside pop-out pages (Torn PDA: scripts don't run there)
     watchPopoutFit(); // pop-outs fit the screen width
     watchPopoutStats(); // FFScouter / BSP estimate in the pop-out bar
