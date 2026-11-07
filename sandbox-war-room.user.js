@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Sandbox War Room 🧪
 // @namespace    jay-torn-war-script-sandbox
-// @version      1.99.44
+// @version      1.99.45
 // @downloadURL  https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @updateURL    https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @description  [SANDBOX - test build, not for general use] Enemy hospital timers, quick attack links, and a chain timeout alert overlay for Torn faction war pages. Works in Tampermonkey (Firefox) and Torn PDA.
@@ -582,7 +582,7 @@ const __twsOuter = (() => {
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.44';
+  const SCRIPT_VERSION = '1.99.45';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -10196,7 +10196,16 @@ const __twsOuter = (() => {
     attachCreditLink(body);
     const callsDbg = body.querySelector('#tws-calls-debug');
     if (callsDbg) callsDbg.addEventListener('click', () => {
-      try { GM_setClipboard(callsDebugText()); showToast('Called check copied \u2013 paste it to Claude.'); } catch (e) { showToast(`Couldn\u2019t copy: ${e.message}`); }
+      const txt = callsDebugText();
+      try { GM_setClipboard(txt, 'text'); } catch (e) { /* next */ }
+      try { navigator.clipboard && navigator.clipboard.writeText(txt).catch(() => {}); } catch (e) { /* ignore */ }
+      // Also shown on screen, in case copying isn't allowed here (screenshot or copy it).
+      const ov = document.createElement('div');
+      ov.style.cssText = 'position:fixed;inset:10px;z-index:2147483646;background:#111;border:1px solid #6b3fa0;border-radius:8px;padding:8px;display:flex;flex-direction:column;gap:6px;';
+      ov.innerHTML = '<b style="color:#fff;font:bold 13px Arial">Called check \u2013 copied. Paste (or screenshot) to Claude.</b><textarea readonly style="flex:1;width:100%;background:#000;color:#ddd;font:11px monospace;"></textarea><button style="padding:8px;">Close</button>';
+      ov.querySelector('textarea').value = txt;
+      ov.querySelector('button').onclick = () => ov.remove();
+      document.body.appendChild(ov);
     });
     body.querySelector('#tws-ki-clear-captures').addEventListener('click', () => {
       setCfg(KI_STORE.captures, []);
