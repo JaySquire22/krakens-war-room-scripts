@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PC War Room 🖥️ (trial)
 // @namespace    jay-torn-war-script-pcwide
-// @version      1.2.12
+// @version      1.2.13
 // @downloadURL  https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/pc-war-room.user.js
 // @updateURL    https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/pc-war-room.user.js
 // @description  [PC TRIAL - built from Sandbox build 1.85.9] Wide PC layout: Enemy | Home | Attacks log side by side. Run INSTEAD of War Room / the sandbox, not alongside.
@@ -236,7 +236,7 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.2.12';
+  const SCRIPT_VERSION = '1.2.13';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -3061,6 +3061,10 @@ const PDA_INJECTED_KEY = "###PDA-APIKEY###";
 
     // Other Torn pages have no war roster to scan.
     if (!onFactionPage()) {
+      return { mode: 'home', enemyId: null };
+    }
+    // Only the faction's War tab has a war roster (news-feed mentions aren't one).
+    if (!/war/i.test(location.hash || '')) {
       return { mode: 'home', enemyId: null };
     }
 
