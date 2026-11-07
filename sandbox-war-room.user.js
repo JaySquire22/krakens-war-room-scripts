@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Sandbox War Room 🧪
 // @namespace    jay-torn-war-script-sandbox
-// @version      1.99.49
+// @version      1.99.50
 // @downloadURL  https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @updateURL    https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @description  [SANDBOX - test build, not for general use] Enemy hospital timers, quick attack links, and a chain timeout alert overlay for Torn faction war pages. Works in Tampermonkey (Firefox) and Torn PDA.
@@ -582,7 +582,7 @@ const __twsOuter = (() => {
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.49';
+  const SCRIPT_VERSION = '1.99.50';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -4813,6 +4813,12 @@ const __twsOuter = (() => {
 
     // Other Torn pages have no war roster to scan.
     if (!onFactionPage()) {
+      return { mode: 'home', enemyId: null };
+    }
+    // Only the faction's War tab has a war roster. Elsewhere (e.g. the news
+    // feed, where a territory assault names the same faction many times) the
+    // links aren't a roster, and counting them made the enemy come and go.
+    if (!/war/i.test(location.hash || '')) {
       return { mode: 'home', enemyId: null };
     }
 
