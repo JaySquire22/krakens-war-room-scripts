@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Sandbox War Room 🧪
 // @namespace    jay-torn-war-script-sandbox
-// @version      1.99.46
+// @version      1.99.47
 // @downloadURL  https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @updateURL    https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @description  [SANDBOX - test build, not for general use] Enemy hospital timers, quick attack links, and a chain timeout alert overlay for Torn faction war pages. Works in Tampermonkey (Firefox) and Torn PDA.
@@ -582,7 +582,7 @@ const __twsOuter = (() => {
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.46';
+  const SCRIPT_VERSION = '1.99.47';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -755,7 +755,7 @@ const __twsOuter = (() => {
     { key: 'copyIcons', group: 'Roster actions', label: '⧉ Copy / send-to-faction-chat icon (Enemy tabs)' },
     { key: 'attackSos', group: 'Roster actions', label: '🆘 SOS button on the attack page', hint: 'Small red button in the Faction chat header (attack page, chat open) that puts "HELP NEEDED!" plus the target\u2019s name, level, estimated stats and attack link into faction chat (or copies it if chat isn\u2019t open).' },
     { key: 'onlineHitNow', group: 'Roster actions', label: 'Copy adds "ONLINE HIT NOW!" for targets who are online and out of hospital', requires: 'copyIcons' },
-    { key: 'chatCalls', group: 'Roster actions', label: '\u260e Called: C next to targets called in Faction chat', hint: 'While Faction chat is open, a message naming an enemy as a call (\u201ccalled NAME\u201d, \u201cNAME IN 7:48\u201d, or just their name) puts a C next to them in the Target tab and the Attacks log (only with 6:10 or less left on their hospital timer; it clears once they\u2019re hospitalised again). Tap the C to see who called them and how long was left on their hospital timer.' },
+    { key: 'chatCalls', group: 'Roster actions', label: '\u260e Called: C next to targets called in Faction chat', hint: 'While Faction chat is open, a message with an enemy\u2019s name and a time (e.g. Killer in 5, KILLER IN 4:48) puts a C next to them in the Target tab and the Attacks log, if the time is 6:10 or less. It clears once they\u2019re hospitalised again. Tap the C to see who called them and their message.' },
     { key: 'atkEtaCopy', group: 'Roster actions', label: 'Tap a hospitalised target\u2019s ATK to send its timer to chat', hint: 'e.g. \u201cKRAKEN IN 7:48\u201d \u2013 the time left on their hospital timer.' },
     { key: 'bountyIcons', group: 'Roster actions', label: '💰 Bounty icon on the Home tab', hint: 'Opens that faction mate\u2019s "place a bounty" page.' },
     { key: 'bountyAutofill', group: 'Roster actions', label: '💰 Auto-fill the bounty amount from their estimated stats', hint: 'Amounts are set in the 💰 Bounty amounts menu at the top of this tab.', requires: 'bountyIcons' },
@@ -5557,10 +5557,8 @@ const __twsOuter = (() => {
     if (!c) return '';
     const ago = Math.max(0, Math.round((Date.now() - c.at) / 1000));
     const agoTxt = ago < 60 ? `${ago}s ago` : `${Math.floor(ago / 60)}m ${ago % 60}s ago`;
-    const timer = c.secs != null && c.secs > 0
-      ? `${fmtDuration(c.secs)} left on their hospital timer when called`
-      : 'they were out of hospital when called';
-    return `☎ ${c.name || 'Target'} called by ${c.by} ${agoTxt} – ${timer}.`;
+    const timer = c.secs ? `called with ${fmtDuration(c.secs)} to go` : 'called for now';
+    return `\u260e ${c.name || 'Target'} \u2013 ${c.by}, ${agoTxt}, ${timer}.${c.msg ? `\n\u201c${c.msg}\u201d` : ''}`;
   }
   // The scrolling message list inside a chat box (found once, then remembered).
   function callMsgList(box) {
@@ -5615,15 +5613,16 @@ const __twsOuter = (() => {
         && new RegExp(`(^|[^a-z0-9_-])${esc(x.name.toLowerCase())}($|[^a-z0-9_-])`).test(low)) || null;
     }
     if (!hit) return null;
-    // Counts as a call: "call/called/calling", War Room's own "NAME IN 7:48", or a message that is little more than the name.
-    const timeM = text.match(/\bin\s+(\d{1,2}):(\d{2})\b/i);
-    const leftover = low.replace(hit.name.toLowerCase(), ' ').replace(/https?:\S+/g, ' ').replace(/[^a-z]+/g, ' ').trim();
-    const isCall = /\bcall(ed|ing|s)?\b/i.test(text) || !!timeM || leftover.split(' ').filter(Boolean).length <= 2;
-    if (!isCall) return null;
-    let secs = timeM ? Number(timeM[1]) * 60 + Number(timeM[2]) : null;
-    if (secs == null && hit.state === 'Hospital' && hit.until) secs = Math.max(0, Math.round(hit.until - Date.now() / 1000));
-    if (secs != null && secs > CALL_MAX_SECS) return null; // too early to call: over 6:10 left
-    return { id: String(hit.id), name: hit.name, by: sender.name, secs };
+    // A call is the name plus a time: "Killer in 5", "KILLER IN 4:48", "Killer 5:30", "Killer 5m".
+    const rest = text.replace(new RegExp(hit.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'ig'), ' ').replace(/https?:\S+/g, ' ');
+    let secs = null;
+    let m = rest.match(/\b(\d{1,2}):(\d{2})\b/);
+    if (m) secs = Number(m[1]) * 60 + Number(m[2]);
+    if (secs == null && (m = rest.match(/\bin\s+(\d{1,2})(?:\s*(?:m|mins?|minutes?))?\b/i))) secs = Number(m[1]) * 60;
+    if (secs == null && (m = rest.match(/\b(\d{1,2})\s*(?:m|mins?|minutes?)\b/i))) secs = Number(m[1]) * 60;
+    if (secs == null) return null;          // no time given: not a call
+    if (secs > CALL_MAX_SECS) return null;  // too early to call: over 6:10 left
+    return { id: String(hit.id), name: hit.name, by: sender.name, secs, msg: String(text).replace(/\s+/g, ' ').trim().slice(0, 200) };
   }
   function scanChatCalls() {
     if (!featureOn('chatCalls') || !enemyMembers.length) return;
@@ -5641,7 +5640,7 @@ const __twsOuter = (() => {
         callMsgSeen.add(m);
         const c = callParse(m);
         if (!c) return;
-        chatCalls[c.id] = { by: c.by, name: c.name, at: Date.now(), secs: c.secs };
+        chatCalls[c.id] = { by: c.by, name: c.name, at: Date.now(), secs: c.secs, msg: c.msg };
         changed = true;
       });
     });
