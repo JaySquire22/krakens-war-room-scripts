@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Krakens War Room 🐙
 // @namespace    jay-torn-war-script
-// @version      1.99.51
+// @version      1.99.52
 // @description  Ranked-war companion for Torn: live enemy roster with hospital timers, chain timers & alerts, attack/retal links, targets, attacks log, battle-stat estimates and a PC wide mode. Works in Tampermonkey and Torn PDA. 2-hour free trial, then 1 Xanax = 7 days.
 // @author       -TheKraken- [3616083]
 // @copyright    2026, -TheKraken- [3616083] - All rights reserved
@@ -584,7 +584,7 @@ const __twsOuter = (() => {
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.51';
+  const SCRIPT_VERSION = '1.99.52';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -823,7 +823,7 @@ const __twsOuter = (() => {
   const COMPLIANCE_OFF = new Set(['bloodQuickUse', 'bloodPreload', 'tempPreload']);
   // Analytics only ever exists in the Sandbox build.
   const IS_SBX_BUILD = 'Krakens War Room'.indexOf('Sandbox') === 0; // false in the Krakens War Room build
-  const SANDBOX_ONLY = 'Krakens War Room'.indexOf('Sandbox') === 0 ? new Set() : new Set(['perfMonitor', 'activityHistory']); // activityHistory: Sandbox-only until tested
+  const SANDBOX_ONLY = 'Krakens War Room'.indexOf('Sandbox') === 0 ? new Set() : new Set(['perfMonitor', 'activityHistory', 'chatCalls']); // activityHistory: Sandbox-only until tested; chatCalls: kept for a Glory build
   function featureOn(key) {
     if (COMPLIANCE_OFF.has(key) || SANDBOX_ONLY.has(key)) return false;
     const f = FEATURE_MAP[key];
@@ -5767,7 +5767,7 @@ const __twsOuter = (() => {
     return lines.join('\n');
   }
   function installChatCalls() {
-    if (IN_POPOUT_FRAME) return;
+    if (IN_POPOUT_FRAME || SANDBOX_ONLY.has('chatCalls')) return;
     setInterval(() => { try { scanChatCalls(); } catch (e) { /* ignore */ } }, 1500);
     document.addEventListener('click', (e) => {
       const el = e.target && e.target.closest && e.target.closest('.tws-call[data-call-id]');
