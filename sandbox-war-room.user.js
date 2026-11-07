@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Sandbox War Room 🧪
 // @namespace    jay-torn-war-script-sandbox
-// @version      1.99.43
+// @version      1.99.44
 // @downloadURL  https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @updateURL    https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @description  [SANDBOX - test build, not for general use] Enemy hospital timers, quick attack links, and a chain timeout alert overlay for Torn faction war pages. Works in Tampermonkey (Firefox) and Torn PDA.
@@ -582,7 +582,7 @@ const __twsOuter = (() => {
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.43';
+  const SCRIPT_VERSION = '1.99.44';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -5641,6 +5641,40 @@ const __twsOuter = (() => {
       safeRender();
     }
   }
+  // Sandbox: a description of what Called can see in the chat, to paste to Claude.
+  function callsDebugText() {
+    const desc = (el) => {
+      if (!el) return '-';
+      const cls = (typeof el.className === 'string' ? el.className : '').split(/\s+/).filter(Boolean).slice(0, 2).join('.');
+      return `${el.tagName.toLowerCase()}${el.id ? '#' + el.id : ''}${cls ? '.' + cls : ''}`;
+    };
+    const tree = (el, depth) => {
+      if (!el || depth > 3) return '';
+      const kids = Array.from(el.children).slice(0, 4).map((k) => tree(k, depth + 1)).filter(Boolean);
+      return `${'  '.repeat(depth)}${desc(el)}${el.children.length ? ` (${el.children.length})` : ` "${(el.textContent || '').trim().slice(0, 30)}"`}${kids.length ? '\n' + kids.join('\n') : ''}`;
+    };
+    const lines = [`Called check ${SCRIPT_VERSION} ${location.pathname}`, `feature on: ${featureOn('chatCalls')}`, `enemy members: ${enemyMembers.length} (pageMode ${pageMode})`];
+    let boxes = [];
+    try { boxes = sosFactionChatBoxes(document); } catch (e) { lines.push(`box error: ${e.message}`); }
+    lines.push(`faction chat boxes: ${boxes.length}`);
+    boxes.slice(0, 1).forEach(({ box }) => {
+      lines.push(`box: ${desc(box)}`);
+      const list = callMsgList(box);
+      lines.push(`list: ${desc(list)} kids=${list ? list.children.length : 0}`);
+      if (!list) return;
+      const msgs = callMessages(list);
+      lines.push(`messages found: ${msgs.length}`);
+      msgs.slice(-3).forEach((m, i) => {
+        lines.push(`--- message ${i + 1}: sender="${callSender(m).name}" text="${String(m.innerText || '').replace(/\s+/g, ' ').slice(0, 80)}"`);
+        lines.push(tree(m, 0));
+        let pr = null;
+        try { pr = callParse(m); } catch (e) { pr = { error: e.message }; }
+        lines.push(`parse: ${JSON.stringify(pr)}`);
+      });
+    });
+    lines.push(`calls stored: ${Object.keys(chatCalls).length}`);
+    return lines.join('\n');
+  }
   function installChatCalls() {
     if (IN_POPOUT_FRAME) return;
     setInterval(() => { try { scanChatCalls(); } catch (e) { /* ignore */ } }, 1500);
@@ -10141,6 +10175,7 @@ const __twsOuter = (() => {
         <button id="tws-adv-bounty" style="margin-bottom:8px;">💰 Bounty amounts ›</button>
         <div class="tws-adv-group" style="margin-top:0;">🐙 Kraken Intel</div>
         <div style="color:#888;font-size:11px;margin:2px 0 8px;">Loadouts Torn reveals on attack pages you view are shared with other contributors when \u201cShare loadouts\u201d below is on. Your Torn API key stays on this device and is never uploaded with shared intel.</div>
+        ${SOS_SANDBOX_BUILD ? '<button id="tws-calls-debug" style="margin-bottom:6px;">\u260e Copy Called chat check (for Claude)</button>' : ''}
         <button id="tws-ki-clear-captures" style="margin-bottom:6px;">🐙 Clear cached observations</button>
         <button id="tws-ki-clear-items" style="margin-bottom:10px;">🐙 Clear cached item details</button>
         ${true ? `
@@ -10159,6 +10194,10 @@ const __twsOuter = (() => {
     `;
     attachSettingsTabs(body);
     attachCreditLink(body);
+    const callsDbg = body.querySelector('#tws-calls-debug');
+    if (callsDbg) callsDbg.addEventListener('click', () => {
+      try { GM_setClipboard(callsDebugText()); showToast('Called check copied \u2013 paste it to Claude.'); } catch (e) { showToast(`Couldn\u2019t copy: ${e.message}`); }
+    });
     body.querySelector('#tws-ki-clear-captures').addEventListener('click', () => {
       setCfg(KI_STORE.captures, []);
       showToast('Cleared cached Kraken Intel observations.');
