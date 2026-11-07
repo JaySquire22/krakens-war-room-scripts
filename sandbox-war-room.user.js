@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Sandbox War Room 🧪
 // @namespace    jay-torn-war-script-sandbox
-// @version      1.99.47
+// @version      1.99.48
 // @downloadURL  https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @updateURL    https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @description  [SANDBOX - test build, not for general use] Enemy hospital timers, quick attack links, and a chain timeout alert overlay for Torn faction war pages. Works in Tampermonkey (Firefox) and Torn PDA.
@@ -582,7 +582,7 @@ const __twsOuter = (() => {
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.47';
+  const SCRIPT_VERSION = '1.99.48';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -5591,6 +5591,58 @@ const __twsOuter = (() => {
     if (!t) { const m = (msg.innerText || '').match(/^\s*([^:\n]{2,24}):/); t = m ? m[1] : ''; }
     return { el: s, name: String(t || '').replace(/[:\s]+$/, '').trim() || 'Someone' };
   }
+  // Loose name matching for calls: case, l33t digits, trailing numbers and a
+  // couple of typos don't matter. Returns { m: member, word } or null.
+  function callNorm(x) {
+    return String(x || '').toLowerCase()
+      .replace(/3/g, 'e').replace(/1/g, 'i').replace(/0/g, 'o').replace(/4/g, 'a').replace(/5/g, 's').replace(/7/g, 't').replace(/@/g, 'a').replace(/\$/g, 's')
+      .replace(/[^a-z0-9]/g, '');
+  }
+  function callCore(name) {
+    // the name without the numbers / underscores it ends with ("WhiteSpid3r324" -> "whitespider")
+    const raw = String(name || '').toLowerCase().replace(/[\d_\-.]+$/, '');
+    return callNorm(raw || name);
+  }
+  function callDist(a, b) {
+    if (Math.abs(a.length - b.length) > 3) return 99;
+    const d = Array.from({ length: a.length + 1 }, (_, i) => [i]);
+    for (let j = 1; j <= b.length; j++) d[0][j] = j;
+    for (let i = 1; i <= a.length; i++) {
+      for (let j = 1; j <= b.length; j++) {
+        d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+      }
+    }
+    return d[a.length][b.length];
+  }
+  function callFuzzyName(text, pool) {
+    const words = String(text || '').replace(/https?:\S+/g, ' ').split(/[^A-Za-z0-9_@$.\-]+/).filter(Boolean);
+    // single words, and two words run together ("white spider")
+    const cands = [];
+    words.forEach((w, i) => {
+      cands.push(w);
+      if (words[i + 1]) cands.push(w + words[i + 1]);
+    });
+    let best = null;
+    cands.forEach((w) => {
+      const t = callNorm(w);
+      if (t.length < 4 || /^\d+$/.test(w)) return;
+      pool.forEach((m) => {
+        const core = callCore(m.name);
+        const full = callNorm(m.name);
+        if (core.length < 3) return;
+        let score = 99;
+        if (t === core || t === full) score = 0;
+        else if (t.length >= 5 && (full.startsWith(t) || core.startsWith(t)) && t.length >= core.length * 0.6) score = 1;
+        else {
+          const dd = Math.min(callDist(t, core), callDist(t, full));
+          const allow = core.length >= 9 ? 2 : core.length >= 5 ? 1 : 0;
+          if (dd <= allow) score = 1 + dd;
+        }
+        if (score < 99 && (!best || score < best.score)) best = { m, word: w, score };
+      });
+    });
+    return best;
+  }
   function callParse(msg) {
     const full = String(msg.innerText || msg.textContent || '');
     if (!full.trim()) return null;
@@ -5607,14 +5659,18 @@ const __twsOuter = (() => {
       const em = m && pool.find((x) => String(x.id) === m[1]);
       if (em && em.name !== sender.name) hit = em;
     });
+    let hitWord = '';
     if (!hit) {
-      const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      hit = pool.find((x) => x.name && x.name.length >= 3 && x.name !== sender.name
-        && new RegExp(`(^|[^a-z0-9_-])${esc(x.name.toLowerCase())}($|[^a-z0-9_-])`).test(low)) || null;
+      // Names don't have to be exact: "whitespider" finds WhiteSpid3r324.
+      const f = callFuzzyName(text, pool.filter((x) => x.name && x.name !== sender.name));
+      if (f) { hit = f.m; hitWord = f.word; }
     }
     if (!hit) return null;
     // A call is the name plus a time: "Killer in 5", "KILLER IN 4:48", "Killer 5:30", "Killer 5m".
-    const rest = text.replace(new RegExp(hit.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'ig'), ' ').replace(/https?:\S+/g, ' ');
+    const escRe = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    let rest = text.replace(new RegExp(escRe(hit.name), 'ig'), ' ');
+    if (hitWord) rest = rest.replace(new RegExp(escRe(hitWord), 'ig'), ' ');
+    rest = rest.replace(/https?:\S+/g, ' ');
     let secs = null;
     let m = rest.match(/\b(\d{1,2}):(\d{2})\b/);
     if (m) secs = Number(m[1]) * 60 + Number(m[2]);
