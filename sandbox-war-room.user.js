@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Sandbox War Room 🧪
 // @namespace    jay-torn-war-script-sandbox
-// @version      1.99.51
+// @version      1.99.52
 // @downloadURL  https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @updateURL    https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @description  [SANDBOX - test build, not for general use] Enemy hospital timers, quick attack links, and a chain timeout alert overlay for Torn faction war pages. Works in Tampermonkey (Firefox) and Torn PDA.
@@ -582,7 +582,7 @@ const __twsOuter = (() => {
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.51';
+  const SCRIPT_VERSION = '1.99.52';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -821,7 +821,7 @@ const __twsOuter = (() => {
   const COMPLIANCE_OFF = new Set(['bloodQuickUse', 'bloodPreload', 'tempPreload']);
   // Analytics only ever exists in the Sandbox build.
   const IS_SBX_BUILD = 'Sandbox War Room'.indexOf('Sandbox') === 0; // false in the Krakens War Room build
-  const SANDBOX_ONLY = 'Sandbox War Room'.indexOf('Sandbox') === 0 ? new Set() : new Set(['perfMonitor', 'activityHistory']); // activityHistory: Sandbox-only until tested
+  const SANDBOX_ONLY = 'Sandbox War Room'.indexOf('Sandbox') === 0 ? new Set() : new Set(['perfMonitor', 'activityHistory', 'chatCalls']); // activityHistory: Sandbox-only until tested; chatCalls: kept for a Glory build
   function featureOn(key) {
     if (COMPLIANCE_OFF.has(key) || SANDBOX_ONLY.has(key)) return false;
     const f = FEATURE_MAP[key];
@@ -5765,7 +5765,7 @@ const __twsOuter = (() => {
     return lines.join('\n');
   }
   function installChatCalls() {
-    if (IN_POPOUT_FRAME) return;
+    if (IN_POPOUT_FRAME || SANDBOX_ONLY.has('chatCalls')) return;
     setInterval(() => { try { scanChatCalls(); } catch (e) { /* ignore */ } }, 1500);
     document.addEventListener('click', (e) => {
       const el = e.target && e.target.closest && e.target.closest('.tws-call[data-call-id]');
