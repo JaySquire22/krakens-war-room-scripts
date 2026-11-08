@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Krakens War Room 🐙
 // @namespace    jay-torn-war-script
-// @version      1.99.52
+// @version      1.99.54
 // @downloadURL  https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/torn-war-script.user.js
 // @updateURL    https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/torn-war-script.user.js
 // @description  Enemy hospital timers, quick attack links, and a chain timeout alert overlay for Torn faction war pages. Works in Tampermonkey (Firefox) and Torn PDA.
@@ -582,7 +582,7 @@ const __twsOuter = (() => {
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.52';
+  const SCRIPT_VERSION = '1.99.54';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -646,6 +646,35 @@ const __twsOuter = (() => {
   // tabs, keep settings in memory and only re-read a value another tab changed.
   const CFG_CACHE_ON = typeof GM_addValueChangeListener === 'function';
   const cfgCache = new Map();
+  // ---- Torn time ----
+  // Timers count down against Torn's clock, not the device's: a phone or PC
+  // whose clock runs fast or slow would otherwise show every timer early or
+  // late. The offset is measured from the Kraken server's clock (kept in step
+  // with Torn's) on each server reply, and remembered between pages.
+  var clockOffsetMs = null;
+  var clockSamples = [];
+  function nowMs() {
+    if (clockOffsetMs === null) {
+      clockOffsetMs = 0;
+      try { clockOffsetMs = Number(getCfg('tws_clock_off', 0)) || 0; } catch (e) { clockOffsetMs = 0; }
+      if (Math.abs(clockOffsetMs) > 6 * 3600 * 1000) clockOffsetMs = 0;
+    }
+    return Date.now() + clockOffsetMs;
+  }
+  function clockNoteSample(serverMs, t0, t1) {
+    serverMs = Number(serverMs);
+    if (!serverMs || !(t1 >= t0) || t1 - t0 > 4000) return; // slow replies are too vague
+    clockSamples.push(serverMs - (t0 + t1) / 2);
+    if (clockSamples.length > 9) clockSamples.shift();
+    const sorted = clockSamples.slice().sort((a, b) => a - b);
+    const med = sorted[Math.floor(sorted.length / 2)];
+    const off = Math.abs(med) < 600 ? 0 : Math.round(med); // under ~half a second: network noise
+    nowMs();
+    if (off !== clockOffsetMs) {
+      clockOffsetMs = off;
+      try { setCfg('tws_clock_off', off); } catch (e) { /* ignore */ }
+    }
+  }
   function getCfg__raw(k, def = '') {
     if (CFG_CACHE_ON && cfgCache.has(k)) {
       const v = cfgCache.get(k);
@@ -755,6 +784,7 @@ const __twsOuter = (() => {
     { key: 'copyIcons', group: 'Roster actions', label: '⧉ Copy / send-to-faction-chat icon (Enemy tabs)' },
     { key: 'attackSos', group: 'Roster actions', label: '🆘 SOS button on the attack page', hint: 'Small red button in the Faction chat header (attack page, chat open) that puts "HELP NEEDED!" plus the target\u2019s name, level, estimated stats and attack link into faction chat (or copies it if chat isn\u2019t open).' },
     { key: 'onlineHitNow', group: 'Roster actions', label: 'Copy adds "ONLINE HIT NOW!" for targets who are online and out of hospital', requires: 'copyIcons' },
+    { key: 'perfTips', group: 'Chain & war', label: '\u26a1 Performance tips', hint: 'When you open War Room, a reminder to close scripts you don\u2019t need during war; and a tip if the page starts struggling during a war.' },
     { key: 'chatCalls', group: 'Roster actions', label: '\u260e Called: C next to targets called in Faction chat', hint: 'While Faction chat is open, a message with an enemy\u2019s name and a time (e.g. Killer in 5, KILLER IN 4:48) puts a C next to them in the Target tab and the Attacks log, if the time is 6:10 or less. It clears once they\u2019re hospitalised again. Tap the C to see who called them and their message.', def: false },
     { key: 'atkEtaCopy', group: 'Roster actions', label: 'Tap a hospitalised target\u2019s ATK to send its timer to chat', hint: 'e.g. \u201cKRAKEN IN 7:48\u201d \u2013 the time left on their hospital timer.' },
     { key: 'bountyIcons', group: 'Roster actions', label: '💰 Bounty icon on the Home tab', hint: 'Opens that faction mate\u2019s "place a bounty" page.' },
@@ -1087,7 +1117,7 @@ const __twsOuter = (() => {
   // are accepted -- guessing only one is what previously made every
   // historical war look "unfinished".
   function findActiveWar(rankedWarsObj, ownId) {
-    const nowSec = Math.floor(Date.now() / 1000);
+    const nowSec = Math.floor(nowMs() / 1000);
     let best = null;
     Object.values(rankedWarsObj || {}).forEach((entry) => {
       const w = (entry && entry.war) || {};
@@ -1178,7 +1208,7 @@ const __twsOuter = (() => {
   // The saved last war, if it's recent enough to still matter.
   function validLastWar() {
     if (!lastWar) return null;
-    if (Date.now() / 1000 - lastWar.endTime > LAST_WAR_KEEP_SEC) return null;
+    if (nowMs() / 1000 - lastWar.endTime > LAST_WAR_KEEP_SEC) return null;
     // Changed faction since that war: it isn't your war any more.
     try {
       const own = getOwnFactionId();
@@ -1587,7 +1617,7 @@ const __twsOuter = (() => {
     }
     // 2) This player's own key (only works with faction API access).
     try {
-      const fromTs = Math.floor(Date.now() / 1000) - RETAL_WINDOW_SEC - 90; // small buffer
+      const fromTs = Math.floor(nowMs() / 1000) - RETAL_WINDOW_SEC - 90; // small buffer
       const attacks = await fetchAttacksV2(fromTs, 0);
       if (wantRetal) retalMap = buildRetalMap(attacks, ownId, enemyId);
       if (keepLog) ingestAtkLog(attacks);
@@ -1677,7 +1707,7 @@ const __twsOuter = (() => {
       added++;
     });
     if (!added) return 0;
-    const cutoff = Date.now() / 1000 - ATKLOG_KEEP_SEC;
+    const cutoff = nowMs() / 1000 - ATKLOG_KEEP_SEC;
     atkLog = log.filter((x) => x.e >= cutoff).sort((p, q) => q.e - p.e || q.s - p.s).slice(0, ATKLOG_MAX);
     saveAtkLogSoon();
     return added;
@@ -1699,7 +1729,7 @@ const __twsOuter = (() => {
   }
   function retalTimerHtml(hitTs) {
     const until = Math.floor(hitTs + RETAL_WINDOW_SEC);
-    return ` <span class="tws-retal-cd" data-retal-until="${until}">${fmtRetalLeft(until - Date.now() / 1000)}</span>`;
+    return ` <span class="tws-retal-cd" data-retal-until="${until}">${fmtRetalLeft(until - nowMs() / 1000)}</span>`;
   }
   let retalExpiredRender = false;
   // ---------------------------------------------------------------------
@@ -2023,7 +2053,7 @@ const __twsOuter = (() => {
 
   function tickRetalTimers__raw() {
     if (!panel) return;
-    const nowS = Date.now() / 1000;
+    const nowS = nowMs() / 1000;
     let expired = false;
     panel.querySelectorAll('.tws-retal-cd[data-retal-until]').forEach((el) => {
       const left = Number(el.dataset.retalUntil) - nowS;
@@ -2068,7 +2098,7 @@ const __twsOuter = (() => {
 
   function atkLogSignature() {
     const ownId = String(getOwnFactionId() || '');
-    const nowS = Date.now() / 1000;
+    const nowS = nowMs() / 1000;
     const list = atkLogList();
     const retalIds = list.filter((x) => atkLogIsRetal(x, ownId, nowS)).map((x) => x.id).join(',');
     return [atkLogFilter, list.length, list[0] ? list[0].id : '', atkLogSource, atkLogError, retalIds, ownId, enemyFactionId || '', atkLogStatsVer, chatCallsVer].join('|');
@@ -2084,7 +2114,7 @@ const __twsOuter = (() => {
     atkLogSig = atkLogSignature();
     const ownId = String(getOwnFactionId() || '');
     const enemyId = (pageMode !== 'home' && enemyFactionId) ? String(enemyFactionId) : '';
-    const nowS = Date.now() / 1000;
+    const nowS = nowMs() / 1000;
     const names = {};
     enemyMembers.forEach((m) => { names[m.id] = m.name; });
     homeMembers.forEach((m) => { names[m.id] = m.name; });
@@ -4419,7 +4449,7 @@ const __twsOuter = (() => {
     }
   }
   function tsSpyFor(id) { const c = tsCache.u[String(id)]; return (c && c.s) || null; }
-  function tsAgeDays(sp) { return sp && sp.ts ? Math.max(0, Math.floor((Date.now() / 1000 - sp.ts) / 86400)) : null; }
+  function tsAgeDays(sp) { return sp && sp.ts ? Math.max(0, Math.floor((nowMs() / 1000 - sp.ts) / 86400)) : null; }
   function tsAgeText(sp) { const d = tsAgeDays(sp); return d === null ? 'age unknown' : d === 0 ? 'today' : `${d}d ago`; }
   function tsFresh(sp) { const d = tsAgeDays(sp); return !!sp && (d === null || d <= TS_FRESH_DAYS); }
   function tsSplitText(sp) { return `Str ${fmtBsHuman(sp.str)} · Def ${fmtBsHuman(sp.def)} · Spd ${fmtBsHuman(sp.spd)} · Dex ${fmtBsHuman(sp.dex)}`; }
@@ -5131,7 +5161,7 @@ const __twsOuter = (() => {
         showToast('Could not determine your hospital time.');
         return;
       }
-      const minutesLeft = Math.floor((hospitalTs - Date.now() / 1000) / 60);
+      const minutesLeft = Math.floor((hospitalTs - nowMs() / 1000) / 60);
       if (minutesLeft < NOMAD_MIN_HOSPITAL_MINUTES) {
         showToast(`You need more than ${NOMAD_MIN_HOSPITAL_MINUTES} minutes left in hospital to request a revive.`);
         return;
@@ -6164,7 +6194,7 @@ const __twsOuter = (() => {
   }
 
   function hospActive() {
-    return featureOn('hospBanner') && ownHosp.until * 1000 > Date.now();
+    return featureOn('hospBanner') && ownHosp.until * 1000 > nowMs();
   }
 
   let hospWasShown = false;
@@ -6261,7 +6291,7 @@ const __twsOuter = (() => {
     let html = null;
     let cls = '';
     if (hospActive()) {
-      const left = Math.max(0, Math.round(ownHosp.until - Date.now() / 1000));
+      const left = Math.max(0, Math.round(ownHosp.until - nowMs() / 1000));
       const l = ownHosp.life;
       html = `${MED_ICON}${l && l.max ? `Health ${Math.round((l.cur / l.max) * 100)}% (${l.cur}/${l.max}) ` : ''}In Hospital ${fmtDuration(left)}${MED_ICON}`;
       cls = 'tws-hflash-hosp';
@@ -6277,8 +6307,10 @@ const __twsOuter = (() => {
         if (pill.className !== cls) pill.className = cls;
       }
     }
-    if (t) t.style.display = on ? 'none' : '';
-    if (en) en.style.display = on ? 'none' : '';
+    // PC Mode has room for both: keep the title (and enemy name) beside the banner.
+    const hideTitle = on && !pcMode();
+    if (t) t.style.display = hideTitle ? 'none' : '';
+    if (en) en.style.display = hideTitle ? 'none' : '';
   }
 
   function flashHeaderHealth(pct, cur, max) {
@@ -7585,9 +7617,9 @@ const __twsOuter = (() => {
       const m = JSON.parse(getCfg(SC_DRAW_KEY, '{}')) || {};
       const k = String(startTime);
       if (!m[k]) {
-        m[k] = Math.floor(Date.now() / 1000);
+        m[k] = Math.floor(nowMs() / 1000);
         // keep it small: drop entries for wars that started over 60 days ago
-        Object.keys(m).forEach((s) => { if (Number(s) < Date.now() / 1000 - 60 * DAY) delete m[s]; });
+        Object.keys(m).forEach((s) => { if (Number(s) < nowMs() / 1000 - 60 * DAY) delete m[s]; });
         setCfg(SC_DRAW_KEY, JSON.stringify(m));
       }
     } catch (e) { /* ignore */ }
@@ -7714,7 +7746,7 @@ const __twsOuter = (() => {
       const me = list.map((w) => (w.factions || []).find((x) => Number(x.id) === fid)).find(Boolean);
       if (me && me.name) card.factionName = me.name;
     }
-    const now = Math.floor(Date.now() / 1000);
+    const now = Math.floor(nowMs() / 1000);
     const current = list.find((w) => !w.end);
     const past = list.filter((w) => w.end && w.end <= now).sort((a, b) => b.start - a.start).slice(0, 5);
     const nowStats = await scStatsAt(id, 0);
@@ -8091,7 +8123,7 @@ const __twsOuter = (() => {
   function travelLabel(m) {
     const est = travelEstimate(m);
     if (!est || est.landAt === null) return null;
-    const left = Math.round((est.landAt - Date.now()) / 1000);
+    const left = Math.round((est.landAt - nowMs()) / 1000);
     if (left <= 0) return 'Landing…';
     return `✈ ${(est.picked || est.learned) ? '' : '~'}${fmtDuration(left)}`;
   }
@@ -8401,7 +8433,7 @@ const __twsOuter = (() => {
     return true;
   }
   function parseMembers__raw(data) {
-    const now = Date.now() / 1000;
+    const now = nowMs() / 1000;
     return Object.entries(data.members || {}).map(([id, m]) => {
       const status = m.status || {};
       const lastAction = m.last_action || {};
@@ -8941,7 +8973,7 @@ const __twsOuter = (() => {
     } catch (e) { /* ignore */ }
     const mode = perfMode();
     if (mode !== 'full' && document.visibilityState === 'hidden') return;
-    const nowS = Date.now() / 1000;
+    const nowS = nowMs() / 1000;
     let freedNow = false;
     const tick = (arr) => arr.map((m) => {
       // Timer hit zero: show them as out (green ATK) now, not at the next API poll.
@@ -8951,7 +8983,7 @@ const __twsOuter = (() => {
       }
       return {
         ...m,
-        remaining: (mode !== 'full' && m.until)
+        remaining: m.until
           ? Math.max(0, Math.round(m.until - nowS))
           : (m.remaining > 0 ? Math.max(0, m.remaining - 1) : 0),
       };
@@ -8997,7 +9029,11 @@ const __twsOuter = (() => {
       refreshRespect();
     }
     // Wide mode: timers tick in place every second; full redraw every 5s.
-    if (freedNow || (mode === 'full' && (!wideActive() || perfTickCount % 5 === 0))) safeRender(); else updateInPlace();
+    // Timers update in place every second; the whole list is only redrawn when
+    // someone comes out (or the data refreshes, or a safety redraw every 15s).
+    // Redrawing everything each second made the page, and other scripts watching it, lag.
+    if (freedNow || perfTickCount % 15 === 0) safeRender(); else updateInPlace();
+    try { lagTick(); } catch (e) { /* ignore */ }
     if (wideActive() && perfTickCount % 5 === 0) renderAtkLog();
   }
 
@@ -9038,7 +9074,7 @@ const __twsOuter = (() => {
     }
     #tws-access { flex-shrink: 0; min-height: 20px; }
     #tws-header b { color: #ff6b6b; white-space: nowrap; }
-    #tws-panel.tws-pc #tws-title, #tws-panel.tws-pc #tws-logo { cursor: pointer; }
+    #tws-panel.tws-pc #tws-title, #tws-panel.tws-pc #tws-logo, #tws-panel.tws-pc #tws-header { cursor: pointer; }
     #tws-panel.tws-pc #tws-title:hover { text-decoration: underline; }
     #tws-hflash {
       display: none; padding: 3px 10px; border-radius: 8px; border: 1px solid #666;
@@ -10712,10 +10748,10 @@ const __twsOuter = (() => {
         suppressNextClick = false;
         return;
       }
-      // Only the "PC War Room" title (or the logo when minimised) minimises/expands.
-      const onTitle = headerPressOnTitle || !!(e.target && e.target.closest && e.target.closest('#tws-title, #tws-logo') && !e.target.closest('#tws-clock'));
+      // Anywhere on the top bar minimises/expands, except its own buttons and bars.
       headerPressOnTitle = false;
-      if (!onTitle && pcMode()) return; // PC Mode: only the title minimises
+      if (e.target && e.target.closest && e.target.closest('a, button, input, select, textarea, .tws-blood-btn, .tws-items-btn, .tws-rev-btn, .tws-gear, #tws-energy, #tws-drug, #tws-clock')
+        && !e.target.closest('#tws-collapse-btn')) return;
       const collapsed = !getCfg(STORE_KEYS.collapsed, false);
       setCfg(STORE_KEYS.collapsed, collapsed);
       render();
@@ -10807,6 +10843,42 @@ const __twsOuter = (() => {
 
   // Balanced/Lite: every second only the timers and chain boxes change;
   // the rest of the panel is rebuilt only when new data arrives.
+  // ---- Performance tips ----
+  // Every time War Room is opened (expanded, or first shown in a browsing
+  // session): a reminder to close scripts that aren't needed during war.
+  var perfTipWasCollapsed = null;
+  function perfTipOnOpen(collapsed) {
+    const was = perfTipWasCollapsed;
+    perfTipWasCollapsed = collapsed;
+    if (collapsed || !featureOn('perfTips')) return;
+    let show = was === true;
+    if (was === null) {
+      try { show = !sessionStorage.getItem('tws_perf_tip'); sessionStorage.setItem('tws_perf_tip', '1'); } catch (e) { show = false; }
+    }
+    if (show) setTimeout(() => showToast('\u26a1 For the best War Room performance, close any scripts you don\u2019t need during war.', { duration: 7000 }), 400);
+  }
+  // During a war, if the page keeps freezing (the 1-second tick arrives late),
+  // a one-off tip suggests a lighter mode. At most once every 6 hours.
+  var lagLast = 0;
+  var lagAvg = 0;
+  var lagHits = 0;
+  function lagTick() {
+    const now = Date.now();
+    if (lagLast) {
+      const late = Math.max(0, now - lagLast - 1000);
+      lagAvg = lagAvg * 0.8 + late * 0.2;
+    }
+    lagLast = now;
+    if (!featureOn('perfTips') || pageMode === 'home' || document.visibilityState === 'hidden') { lagHits = 0; return; }
+    lagHits = lagAvg > 350 ? lagHits + 1 : 0;
+    if (lagHits < 20) return;
+    lagHits = 0;
+    const last = Number(getCfg('tws_lag_tip_at', 0)) || 0;
+    if (Date.now() - last < 6 * 3600 * 1000) return;
+    setCfg('tws_lag_tip_at', Date.now());
+    const lighter = perfMode() === 'full' ? 'Balanced or Lite' : perfMode() === 'balanced' ? 'Lite' : '';
+    showToast(`\ud83d\udc22 This page is struggling to keep up. ${lighter ? `Try ${lighter} mode (\u2699 Advanced) and ` : ''}close other scripts you don\u2019t need right now.`, { warn: true, duration: 9000 });
+  }
   function updateInPlace__raw() {
     if (!panel || showSettings || getCfg(STORE_KEYS.collapsed, false)) return;
     const byId = {};
@@ -11260,6 +11332,7 @@ const __twsOuter = (() => {
     const body = (opts && opts.body) || panel.querySelector('#tws-body');
     const colSide = viewSide; // this column's side, for the click handlers below
     const collapsed = getCfg(STORE_KEYS.collapsed, false);
+    try { perfTipOnOpen(!!collapsed); } catch (e) { /* ignore */ }
     // Minimised: the whole panel becomes the small Kraken logo (tap to expand).
     panel.classList.toggle('tws-mini', !!collapsed && featureOn('miniLogo'));
     panel.classList.toggle('tws-collapsed', !!collapsed);
@@ -11490,7 +11563,7 @@ const __twsOuter = (() => {
     // moment a war ends until a new one is matched.
     const warResultBoxHtml = (wideCol !== 'home' && wideCol !== 'target' && featureOn('warResult') && postWarInfo) 
       ? (() => {
-        const now = Math.floor(Date.now() / 1000);
+        const now = Math.floor(nowMs() / 1000);
         const elapsed = now - postWarInfo.endTime;
         return (elapsed < 86400) ? warResultHtml(postWarInfo) : '';
       })()
@@ -11500,7 +11573,7 @@ const __twsOuter = (() => {
     // ahead before the roster/chain UI above even has anything to show.
     const upcomingWarHtml = (featureOn('upcomingWar') && upcomingWar)
       ? `<div style="background:#3a2d1e;border:1px solid #6b4d1e;border-radius:6px;padding:8px;margin-bottom:8px;text-align:center;">
-           ⚔️ War vs ${upcomingWar.enemyName || `Faction ${upcomingWar.enemyId}`} in ${fmtCountdown(upcomingWar.startTime - Math.floor(Date.now() / 1000))}
+           ⚔️ War vs ${upcomingWar.enemyName || `Faction ${upcomingWar.enemyId}`} in ${fmtCountdown(upcomingWar.startTime - Math.floor(nowMs() / 1000))}
          </div>`
       : '';
 
@@ -11672,7 +11745,7 @@ const __twsOuter = (() => {
         ? ` <a class="tws-bounty-icon" data-bounty-id="${m.id}" target="_blank" href="${bountyUrl(m.id)}" title="Place a bounty on ${m.name}${bountyAmt ? ` ($${bountyAmt.toLocaleString()})` : ''}">💰</a>`
         : '';
       const retalTs = featureOn('retalDetect') ? retalMap[m.id] : null;
-      const isRetal = !!(attackable && retalTs && (Date.now() / 1000 - retalTs) <= RETAL_WINDOW_SEC);
+      const isRetal = !!(attackable && retalTs && (nowMs() / 1000 - retalTs) <= RETAL_WINDOW_SEC);
       const atkLabel = isRetal ? `Retal${retalTimerHtml(retalTs)}` : 'ATK';
       const actionHtml = showAttack
         ? `<a class="tws-atk ${attackable ? '' : (m.state === 'Traveling' ? 'tws-atk-travel' : 'tws-atk-disabled')}" data-atk-id="${m.id}" target="_blank"
@@ -12171,8 +12244,10 @@ const __twsOuter = (() => {
   // pass if the server says it's missing or expired.
   async function serverGet(url) {
     const withPass = (p) => `${url}${url.includes('?') ? '&' : '?'}wb=1&p=${encodeURIComponent(p || '')}`;
+    let t0 = Date.now();
     let d = await httpGetJson(withPass(await getPass(false)));
-    if (d && d.needAuth) d = await httpGetJson(withPass(await getPass(true)));
+    if (d && d.needAuth) { t0 = Date.now(); d = await httpGetJson(withPass(await getPass(true))); }
+    try { if (d && d.now) clockNoteSample(d.now, t0, Date.now()); } catch (e) { /* ignore */ }
     return d;
   }
 
