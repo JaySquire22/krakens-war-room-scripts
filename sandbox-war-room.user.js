@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Sandbox War Room 🧪
 // @namespace    jay-torn-war-script-sandbox
-// @version      1.99.53
+// @version      1.99.54
 // @downloadURL  https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @updateURL    https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @description  [SANDBOX - test build, not for general use] Enemy hospital timers, quick attack links, and a chain timeout alert overlay for Torn faction war pages. Works in Tampermonkey (Firefox) and Torn PDA.
@@ -582,7 +582,7 @@ const __twsOuter = (() => {
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.53';
+  const SCRIPT_VERSION = '1.99.54';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -6307,8 +6307,10 @@ const __twsOuter = (() => {
         if (pill.className !== cls) pill.className = cls;
       }
     }
-    if (t) t.style.display = on ? 'none' : '';
-    if (en) en.style.display = on ? 'none' : '';
+    // PC Mode has room for both: keep the title (and enemy name) beside the banner.
+    const hideTitle = on && !pcMode();
+    if (t) t.style.display = hideTitle ? 'none' : '';
+    if (en) en.style.display = hideTitle ? 'none' : '';
   }
 
   function flashHeaderHealth(pct, cur, max) {
@@ -9072,7 +9074,7 @@ const __twsOuter = (() => {
     }
     #tws-access { flex-shrink: 0; min-height: 20px; }
     #tws-header b { color: #ff6b6b; white-space: nowrap; }
-    #tws-panel.tws-pc #tws-title, #tws-panel.tws-pc #tws-logo { cursor: pointer; }
+    #tws-panel.tws-pc #tws-title, #tws-panel.tws-pc #tws-logo, #tws-panel.tws-pc #tws-header { cursor: pointer; }
     #tws-panel.tws-pc #tws-title:hover { text-decoration: underline; }
     #tws-hflash {
       display: none; padding: 3px 10px; border-radius: 8px; border: 1px solid #666;
@@ -10746,10 +10748,10 @@ const __twsOuter = (() => {
         suppressNextClick = false;
         return;
       }
-      // Only the "PC War Room" title (or the logo when minimised) minimises/expands.
-      const onTitle = headerPressOnTitle || !!(e.target && e.target.closest && e.target.closest('#tws-title, #tws-logo') && !e.target.closest('#tws-clock'));
+      // Anywhere on the top bar minimises/expands, except its own buttons and bars.
       headerPressOnTitle = false;
-      if (!onTitle && pcMode()) return; // PC Mode: only the title minimises
+      if (e.target && e.target.closest && e.target.closest('a, button, input, select, textarea, .tws-blood-btn, .tws-items-btn, .tws-rev-btn, .tws-gear, #tws-energy, #tws-drug, #tws-clock')
+        && !e.target.closest('#tws-collapse-btn')) return;
       const collapsed = !getCfg(STORE_KEYS.collapsed, false);
       setCfg(STORE_KEYS.collapsed, collapsed);
       render();
