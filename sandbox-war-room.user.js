@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Sandbox War Room 🧪
 // @namespace    jay-torn-war-script-sandbox
-// @version      1.99.54
+// @version      1.99.55
 // @downloadURL  https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @updateURL    https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @description  [SANDBOX - test build, not for general use] Enemy hospital timers, quick attack links, and a chain timeout alert overlay for Torn faction war pages. Works in Tampermonkey (Firefox) and Torn PDA.
@@ -582,7 +582,7 @@ const __twsOuter = (() => {
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.54';
+  const SCRIPT_VERSION = '1.99.55';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -785,6 +785,7 @@ const __twsOuter = (() => {
     { key: 'attackSos', group: 'Roster actions', label: '🆘 SOS button on the attack page', hint: 'Small red button in the Faction chat header (attack page, chat open) that puts "HELP NEEDED!" plus the target\u2019s name, level, estimated stats and attack link into faction chat (or copies it if chat isn\u2019t open).' },
     { key: 'onlineHitNow', group: 'Roster actions', label: 'Copy adds "ONLINE HIT NOW!" for targets who are online and out of hospital', requires: 'copyIcons' },
     { key: 'perfTips', group: 'Chain & war', label: '\u26a1 Performance tips', hint: 'When you open War Room, a reminder to close scripts you don\u2019t need during war; and a tip if the page starts struggling during a war.' },
+    { key: 'dibs', group: 'Roster actions', label: '\u270b Dibs: call targets with Glory Command', hint: 'Call buttons next to enemies during a Dibs war: hospital and flight timers only, from 5:59 down to 0:16. The first call to reach the server wins. Only one of Dibs or Called (C) can be on.' },
     { key: 'chatCalls', group: 'Roster actions', label: '\u260e Called: C next to targets called in Faction chat', hint: 'While Faction chat is open, a message with an enemy\u2019s name and a time (e.g. Killer in 5, KILLER IN 4:48) puts a C next to them in the Target tab and the Attacks log, if the time is 6:10 or less. It clears once they\u2019re hospitalised again. Tap the C to see who called them and their message.', def: false },
     { key: 'atkEtaCopy', group: 'Roster actions', label: 'Tap a hospitalised target\u2019s ATK to send its timer to chat', hint: 'e.g. \u201cKRAKEN IN 7:48\u201d \u2013 the time left on their hospital timer.' },
     { key: 'bountyIcons', group: 'Roster actions', label: '💰 Bounty icon on the Home tab', hint: 'Opens that faction mate\u2019s "place a bounty" page.' },
@@ -851,12 +852,13 @@ const __twsOuter = (() => {
   const COMPLIANCE_OFF = new Set(['bloodQuickUse', 'bloodPreload', 'tempPreload']);
   // Analytics only ever exists in the Sandbox build.
   const IS_SBX_BUILD = 'Sandbox War Room'.indexOf('Sandbox') === 0; // false in the Krakens War Room build
-  const SANDBOX_ONLY = 'Sandbox War Room'.indexOf('Sandbox') === 0 ? new Set() : new Set(['perfMonitor', 'activityHistory', 'chatCalls']); // activityHistory: Sandbox-only until tested; chatCalls: kept for a Glory build
+  const SANDBOX_ONLY = 'Sandbox War Room'.indexOf('Sandbox') === 0 ? new Set() : new Set(['perfMonitor', 'activityHistory', 'chatCalls', 'dibs']); // activityHistory: Sandbox-only until tested; chatCalls: kept for a Glory build
   function featureOn(key) {
     if (COMPLIANCE_OFF.has(key) || SANDBOX_ONLY.has(key)) return false;
     const f = FEATURE_MAP[key];
     if (!f) return true;
     if (f.requires && !featureOn(f.requires)) return false;
+    if (key === 'chatCalls' && featureStored('dibs') && !SANDBOX_ONLY.has('dibs')) return false; // Dibs and Called (C) are never both on
     return featureStored(key);
   }
 
@@ -5577,6 +5579,112 @@ const __twsOuter = (() => {
     });
     return changed;
   }
+  // ---------------------------------------------------------------------
+  // Dibs (Glory Command calling system). Sandbox only. The server decides who
+  // wins a call; this shows Call / Taken / Yours next to enemies and your own
+  // call at the top of the list. One request to Jay's server per tap.
+  // ---------------------------------------------------------------------
+  const DIBS_URL = 'https://dashing-fish-54.eu-west-1.convex.site/chain/api';
+  const DIB = { st: null, busy: false, skew: 0, rtt: null, lastPoll: 0, deniedUntil: 0, downAt: 0 };
+  function dibOwnId() { try { const c = JSON.parse(getCfg(PASS_KEY, 'null')); return c && c.id ? Number(c.id) : 0; } catch (e) { return 0; } }
+  async function dibApi(body) {
+    const pass = await getPass(false);
+    const pid = dibOwnId();
+    if (!pass || !pid) throw new Error('no pass');
+    const me = homeMembers.find((x) => String(x.id) === String(pid));
+    Object.assign(body, { f: Number(getOwnFactionId()) || 0, pid, pass, name: me ? me.name : '', pin: '' });
+    return httpPostJson(DIBS_URL, body);
+  }
+  function dibActive() {
+    const st = DIB.st;
+    return featureOn('dibs') && !!st && st.on && !!enemyFactionId && Number(st.enemyF) === Number(enemyFactionId);
+  }
+  function dibPoll() {
+    if (!featureOn('dibs') || document.hidden || !enemyFactionId || Date.now() < DIB.deniedUntil) return;
+    if (DIB.inFlight || Date.now() - DIB.lastPoll < 3000) return;
+    DIB.lastPoll = Date.now(); DIB.inFlight = true;
+    const q0 = Date.now();
+    dibApi({ op: 'dibsState' }).then((j) => {
+      const q1 = Date.now();
+      DIB.inFlight = false;
+      if (!j || j.error) {
+        if (j && j.needAuth) { getPass(true); return; }
+        DIB.st = null; DIB.deniedUntil = Date.now() + 10 * 60 * 1000; // not in the trial (or not a Glory faction): check again in 10 min
+        return;
+      }
+      DIB.st = j;
+      // the server's clock, to the millisecond (half the round trip each way)
+      if (j.nowMs && (DIB.rtt == null || q1 - q0 <= DIB.rtt * 1.5)) { DIB.skew = j.nowMs - (q0 + q1) / 2; DIB.rtt = DIB.rtt == null ? q1 - q0 : Math.min(q1 - q0, DIB.rtt * 1.2); }
+    }).catch(() => { DIB.inFlight = false; });
+  }
+  function dibNow() { return (Date.now() + DIB.skew) / 1000; }
+  function dibTime(ms) { return new Date(ms).toISOString().slice(11, 23); }
+  function dibLeft(ms) { if (!ms) return ''; const t = ms / 1000; const m = Math.floor(t / 60); return ` (${m ? m + 'm ' : ''}${(t - m * 60).toFixed(1)}s left)`; }
+  function dibTimer(t, now) {
+    if (t[1] === 'Hospital' && t[2] > now) return t[2] - now;
+    if (t[1] === 'Traveling' && t[6]) return t[6] - now;
+    return null; // already out (or in the air with no landing time): can't be called
+  }
+  function dibCellHtml(id) {
+    const st = DIB.st, t = st.targets && st.targets[String(id)];
+    if (!t) return '';
+    const me = dibOwnId(), d = (st.dibs || []).find((x) => x.t === Number(id));
+    if (d && d.by === me) return '<span class="kwr-dib-yours">\u2705</span>';
+    if (d) return `<span class="kwr-dib-taken">\u270b ${escHtml(d.byName)}${d.myMs ? ` <i>+${((d.myMs - d.ms) / 1000).toFixed(2)}s</i>` : ''}</span>`;
+    const left = dibTimer(t, dibNow());
+    if (left == null) return '';
+    if (left <= 15) return '<button class="kwr-dib-btn kwr-dib-off" disabled>Late</button>';
+    if (left > (st.callFrom || 359)) return '<button class="kwr-dib-btn kwr-dib-off" disabled>Call</button>';
+    return `<button class="kwr-dib-btn" data-dib-call="${escHtml(String(id))}">Call</button>`;
+  }
+  function dibCalledHtml() {
+    const st = DIB.st, me = dibOwnId(), d = (st.dibs || []).find((x) => x.by === me);
+    if (!d) return '';
+    const t = (st.targets && st.targets[String(d.t)]) || ['#' + d.t], now = dibNow();
+    const left = dibTimer(t, now);
+    const line = left != null ? (t[1] === 'Traveling' ? `lands in ~${fmtDuration(Math.max(0, Math.ceil(left)))}` : `out in ${fmtDuration(Math.ceil(left))}`)
+      : d.outAt ? `hit within ${fmtDuration(Math.max(0, Math.ceil((st.holdSec || 180) - (now - d.outAt))))}` : 'out now';
+    return `<div class="kwr-dib-called"><span class="kwr-dib-ct">\u270b Called: <b>${escHtml(t[0])}</b><br><small>${line} \u00b7 called ${dibTime(d.ms)}${dibLeft(d.leftMs)}</small></span>`
+      + `<a class="tws-atk" target="_blank" href="${attackUrl(d.t)}">ATK</a><button class="kwr-dib-btn kwr-dib-un" data-dib-rel="${d.t}">\u21a9 Uncall</button></div>`;
+  }
+  function dibTick() {
+    dibPoll();
+    const on = dibActive();
+    document.querySelectorAll('.kwr-dib[data-dib-id]').forEach((el) => { const h = on ? dibCellHtml(el.getAttribute('data-dib-id')) : ''; if (el.__h !== h) { el.__h = h; el.innerHTML = h; } });
+    const box = document.getElementById('kwr-dib-called');
+    if (box) { const h = on ? dibCalledHtml() : ''; if (box.__h !== h) { box.__h = h; box.innerHTML = h; box.style.display = h ? '' : 'none'; } }
+  }
+  setTimeout(() => setInterval(dibTick, 250), 3000);
+  function dibCall(id) {
+    if (DIB.busy) return;
+    DIB.busy = true;
+    dibApi({ op: 'dibCall', target: Number(id) }).then((j) => {
+      DIB.busy = false; DIB.lastPoll = 0;
+      if (j && j.ok) showToast(`\u2705 It\u2019s yours! Called ${dibTime(j.ms)} TCT${dibLeft(j.leftMs)}${j.online ? '. They\u2019re ONLINE: if still online when out, anyone can hit them.' : '.'}`, { ok: true });
+      else if (j && j.why === 'taken') showToast(`\u2716 Taken by ${j.byName}, called ${dibTime(j.winMs)}${dibLeft(j.winLeftMs)}. Yours registered ${dibTime(j.ms)}${j.ms > j.winMs ? ` (${((j.ms - j.winMs) / 1000).toFixed(3)}s too late)` : ''}.`, { error: true });
+      else showToast(`\u2716 ${(j && (j.msg || j.error)) || 'Call failed'}${j && j.ms ? ` (registered ${dibTime(j.ms)})` : ''}`, { warn: true });
+      dibTick();
+    }).catch(() => { DIB.busy = false; showToast('\u2716 Couldn\u2019t reach the Dibs server', { error: true }); });
+  }
+  // Call fires as the finger touches the button (quicker, and a list update can't swallow the tap)
+  document.addEventListener('pointerdown', (e) => {
+    const b = e.target.closest && e.target.closest('[data-dib-call]');
+    if (!b || b.disabled) return;
+    e.preventDefault(); e.stopPropagation();
+    DIB.downAt = Date.now();
+    dibCall(b.getAttribute('data-dib-call'));
+  }, true);
+  document.addEventListener('click', (e) => {
+    const c = e.target.closest && e.target.closest('[data-dib-call]');
+    if (c) { e.preventDefault(); e.stopPropagation(); return; } // already sent on touch
+    const r = e.target.closest && e.target.closest('[data-dib-rel]');
+    if (!r) return;
+    e.preventDefault(); e.stopPropagation();
+    const id = r.getAttribute('data-dib-rel'), t = DIB.st && DIB.st.targets && DIB.st.targets[id];
+    if (!window.confirm(`Release ${t ? t[0] : 'this target'}? Anyone will be able to call them.`)) return;
+    dibApi({ op: 'dibRelease', target: Number(id) }).then((j) => { DIB.lastPoll = 0; if (j && j.ok === false) showToast(`\u2716 ${j.msg}`, { warn: true }); else showToast('\u21a9 Uncalled.', { ok: true }); }).catch(() => {});
+  }, true);
+
   function callOf(id) {
     if (!featureOn('chatCalls')) return null;
     const c = chatCalls[String(id)];
@@ -9269,6 +9377,17 @@ const __twsOuter = (() => {
       border-radius: 2px;
       line-height: 1.4;
     }
+    .kwr-dib { display: inline-flex; align-items: center; margin-right: 4px; }
+    .kwr-dib:empty { display: none; }
+    .kwr-dib-btn { border: none; border-radius: 4px; padding: 3px 8px; font-size: 11px; font-weight: bold; background: #2dd4bf; color: #04201c; cursor: pointer; -webkit-user-select: none; user-select: none; touch-action: manipulation; }
+    .kwr-dib-btn.kwr-dib-off { background: #333; color: #777; cursor: default; }
+    .kwr-dib-btn.kwr-dib-un { background: #444; color: #eee; margin-left: 4px; }
+    .kwr-dib-taken { font-size: 10px; color: #ff8a8a; white-space: nowrap; }
+    .kwr-dib-taken i { color: #aaa; font-style: normal; }
+    .kwr-dib-yours { font-size: 12px; }
+    .kwr-dib-called { display: flex; align-items: center; gap: 6px; padding: 5px 6px; margin-bottom: 4px; border: 1px solid #22c55e; border-radius: 6px; background: rgba(34,197,94,.12); }
+    .kwr-dib-ct { flex: 1; font-size: 12px; color: #d1fae5; }
+    .kwr-dib-ct small { color: #9ad9b5; font-size: 10px; }
     .tws-atk {
       background: #2e7d32;
       color: white;
@@ -10408,6 +10527,13 @@ const __twsOuter = (() => {
       cb.addEventListener('change', () => {
         // Just save the feature, don't re-render the entire settings
         setFeature(cb.dataset.feat, cb.checked);
+        // Dibs and Called (C) can't both be on: switching one on switches the other off
+        const other = cb.checked ? ({ dibs: 'chatCalls', chatCalls: 'dibs' })[cb.dataset.feat] : null;
+        if (other) {
+          setFeature(other, false);
+          const ob = body.querySelector(`input[data-feat="${other}"]`);
+          if (ob) ob.checked = false;
+        }
         onFeatureChanged();
         // Update dependent toggles' dimming without full re-render
         FEATURES.forEach((f) => {
@@ -11756,6 +11882,7 @@ const __twsOuter = (() => {
         <div class="tws-row">
           <span class="tws-name" data-row-id="${m.id}">${ffDot}<a class="tws-name-link ${themeId === 'ff' ? '' : lastActionClass} ${flashClass}"${ffStyle} target="_blank" href="${profileUrl}">${m.name}</a> <small class="${themeId === 'ff' ? '' : lastActionClass}"${ffStyle}>(Lvl ${m.level})</small>${viewSide === 'target' ? callBadgeHtml(m.id) : ''}${figureHtml}${bountyIconHtml}${copyIconHtml}${starHtml}${homeCardHtml}</span>
           <span class="tws-time ${statusClass}${flashClass ? ' tws-name-flash' : ''}${travelOn ? ' tws-travel-eta' : ''}" data-time-id="${m.id}"${travelOn ? ` data-travel-id="${m.id}" title="Tap for every travel method"` : ''}>${timeLabel}</span>
+          ${(showAttack && featureOn('dibs')) ? `<span class="kwr-dib" data-dib-id="${m.id}">${dibActive() ? dibCellHtml(m.id) : ''}</span>` : ''}
           ${actionHtml}
         </div>
       `;
@@ -11826,7 +11953,7 @@ const __twsOuter = (() => {
       ${fixedTop ? staticBlock : ''}
       <div id="tws-roster">
         ${fixedTop ? '' : staticBlock}
-        ${viewSide === 'log' ? atkLogHtml() : (rowsHtml || `<div style="opacity:0.6;">${emptyMessage}</div>`)}
+        ${viewSide === 'log' ? atkLogHtml() : ((featureOn('dibs') && (viewSide === 'enemy' || viewSide === 'target') ? `<div id="kwr-dib-called" style="${dibActive() && dibCalledHtml() ? '' : 'display:none'}">${dibActive() ? dibCalledHtml() : ''}</div>` : '') + (rowsHtml || `<div style="opacity:0.6;">${emptyMessage}</div>`))}
         ${lastError ? `<div class="tws-error">${lastError}</div>` : ''}
         ${currentFfError ? `<div class="tws-error">${statsSource() === 'both' ? '' : `${statsSourceName()}: `}${currentFfError}</div>` : ''}
         ${(isRespectView && respectError) ? `<div class="tws-error">Respect: ${respectError}</div>` : ''}
