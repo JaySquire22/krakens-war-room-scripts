@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Glory Dibs ✋
 // @namespace    jay-glory-dibs
-// @version      0.2.6
+// @version      0.2.7
 // @description  Call buttons for Glory Command Dibs on the war page, enemy faction pages and enemy profiles. By -TheKraken- [3616083].
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/factions.php*
@@ -405,10 +405,10 @@
     ".gdb-cell{display:inline-flex;align-items:center;gap:4px;margin-left:6px;vertical-align:middle;font:bold 11px Arial,sans-serif}",
     ".gdb-cell:empty{display:none}",
     ".gdb-cell.gdb-in-status{margin:0 4px 0 0}",
-    ".gdb-cell.gdb-wide{margin:0;gap:0;font-size:12px;width:100%;display:flex}",
-    ".gdb-tcol{flex:1 1 auto;min-width:0;overflow:hidden;display:flex;align-items:center;justify-content:flex-start;padding-left:6px;box-sizing:border-box;white-space:nowrap}",
-    ".gdb-dcol{flex:0 0 96px;width:96px;display:flex;align-items:center;justify-content:flex-end;padding-right:6px;box-sizing:border-box;white-space:nowrap;overflow:hidden}",
-    ".gdb-dcol.gdb-h{justify-content:flex-end}",
+    ".gdb-cell.gdb-wide{margin:0;gap:0;font-size:12px;width:100%;display:flex;align-items:center}",
+    ".gdb-tcol{display:block;flex:none;width:calc(100% - 96px);text-align:left;padding-left:6px;box-sizing:border-box;white-space:nowrap}",
+    ".gdb-tcol .gdb-tm{display:inline}",
+    ".gdb-dcol{display:flex;flex:none;width:96px;align-items:center;justify-content:flex-end;padding-right:6px;box-sizing:border-box;white-space:nowrap}",
     ".gdb-h{font-weight:bold}",
     ".gdb-psec{min-height:0!important;height:auto!important;margin-bottom:8px}",
     ".gdb-pbar{display:flex!important;align-items:center;justify-content:space-between;gap:8px}",
