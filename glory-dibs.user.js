@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Glory Dibs ✋
 // @namespace    jay-glory-dibs
-// @version      0.1.2
+// @version      0.1.3
 // @description  Call buttons for Glory Command Dibs on the war page, enemy faction pages and enemy profiles. By -TheKraken- [3616083].
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/factions.php*
@@ -90,7 +90,7 @@
     var left = timer(t, nowS());
     if (left == null) return "";
     var tm = (t[1] === "Traveling" ? "\u2708 " : "") + dur(left);
-    if (left <= LATE) return '<button class="gdb-btn gdb-off" disabled>Late</button>';
+    if (left <= LATE) return (t[1] === "Traveling" && left <= 0 ? '<span class="gdb-tm">\u2708 landing</span>' : "") + '<button class="gdb-btn gdb-off" disabled>Late</button>';
     if (left > (st.callFrom || CALL_FROM)) return '<span class="gdb-tm">' + tm + '</span><button class="gdb-btn gdb-off" disabled>Call</button>';
     return '<span class="gdb-tm gdb-open">' + tm + '</span><button class="gdb-btn" data-gdb-call="' + id + '">Call</button>';
   }
@@ -101,39 +101,98 @@
 
   // ---- put a holder next to each enemy name on the page ----
   function idOf(a) { var m = String(a.getAttribute("href") || "").match(/XID=(\d+)/i); return m ? m[1] : ""; }
+  // ---- find Torn's own pieces by their visible text (class names change too often) ----
+  function leaf(text, root) {
+    var els = (root || document).querySelectorAll("div, span, li, h4, h5, p");
+    for (var i = 0; i < els.length; i++) if (els[i].childElementCount === 0 && els[i].textContent.trim() === text) return els[i];
+    return null;
+  }
+  // the member-list header with Position and Days columns (enemy faction page)
+  var HDR = null;
+  function memberHeader() {
+    if (HDR && HDR.row.isConnected) return HDR;
+    HDR = null;
+    var d = leaf("Days"), p = leaf("Position");
+    if (!d || !p) return null;
+    var row = d; while (row && !(row.contains(p) && row.childElementCount >= 4)) row = row.parentElement;
+    if (!row) return null;
+    var kid = function (el) { while (el.parentElement !== row) el = el.parentElement; return el; };
+    var pc = kid(p), dc = kid(d), kids = Array.prototype.slice.call(row.children);
+    HDR = { row: row, pos: kids.indexOf(pc), days: kids.indexOf(dc), n: kids.length, w: pc.offsetWidth + dc.offsetWidth };
+    // header: "Position" becomes "Dibs" across both columns
+    p.textContent = "Dibs"; dc.style.display = "none";
+    if (HDR.w > 40) pc.style.cssText += ";width:" + HDR.w + "px;max-width:" + HDR.w + "px;flex:0 0 " + HDR.w + "px";
+    return HDR;
+  }
+  function wideRow(row, H) {
+    var pc = row.children[H.pos], dc = row.children[H.days];
+    if (!pc || !dc) return null;
+    if (dc.style.display !== "none") dc.style.display = "none";
+    if (pc.getAttribute("data-gdb") !== "1") {
+      pc.setAttribute("data-gdb", "1"); pc.innerHTML = "";
+      if (H.w > 40) pc.style.cssText += ";width:" + H.w + "px;max-width:" + H.w + "px;flex:0 0 " + H.w + "px;display:flex;align-items:center;justify-content:center";
+    }
+    return pc;
+  }
+  var lastAttach = 0;
   function attach() {
-    if (!active()) return;
+    if (!active() || Date.now() - lastAttach < 700) return;
+    lastAttach = Date.now();
     var T = S.st.targets || {};
-    // faction pages (your war page, the enemy's page): one holder per member row
     if (/factions\.php/i.test(location.href)) {
+      var H = memberHeader();
       var links = document.querySelectorAll('a[href*="profiles.php?XID="]');
       for (var i = 0; i < links.length; i++) {
         var a = links[i], id = idOf(a);
         if (!id || !T[id]) continue;
-        if (a.closest('[class*="chat"], #gdb-panel, #gdb-called, #gdb-prof')) continue; // not in chat or our own boxes
-        var row = a.closest("li") || a.closest("tr") || a.parentElement;
+        if (a.closest('[class*="chat"], #gdb-panel, #gdb-called, #gdb-prof, .gdb-psec')) continue; // not in chat or our own boxes
+        var row = null;
+        if (H) { row = a; while (row && !(row.childElementCount === H.n && row.parentElement && row !== H.row && !row.contains(H.row))) row = row.parentElement; }
+        var holder;
+        if (row) {
+          // enemy faction page: Position + Days make room for the timer and Call button
+          var cellEl = wideRow(row, H);
+          if (!cellEl) continue;
+          Array.prototype.forEach.call(row.parentElement.children, function (r) { if (r.childElementCount === H.n) wideRow(r, H); });
+          if (cellEl.querySelector(".gdb-cell")) continue;
+          holder = document.createElement("span"); holder.className = "gdb-cell gdb-wide"; holder.setAttribute("data-gdb-id", id);
+          cellEl.appendChild(holder);
+          continue;
+        }
+        // other faction lists (the war page): in the row's Status cell
+        row = a.closest("li") || a.closest("tr") || a.parentElement;
         if (!row || row.querySelector('.gdb-cell[data-gdb-id="' + id + '"]')) continue;
-        var h = document.createElement("span");
-        h.className = "gdb-cell"; h.setAttribute("data-gdb-id", id);
-        // names are often honor-bar pictures, so the button goes in the row's Status cell (Okay / Hospital / Traveling...)
+        holder = document.createElement("span"); holder.className = "gdb-cell"; holder.setAttribute("data-gdb-id", id);
         var cells = row.querySelectorAll('[class*="status"]'), stc = null;
         for (var c = cells.length - 1; c >= 0; c--) {
           if (/okay|hospital|travel|abroad|jail|fallen|fedded|federal|\d+:\d+/i.test(cells[c].textContent) && !cells[c].querySelector('[class*="status"]')) { stc = cells[c]; break; }
         }
-        if (stc) { h.className += " gdb-in-status"; stc.insertBefore(h, stc.firstChild); }
-        else a.insertAdjacentElement("afterend", h);
+        if (stc) { holder.className += " gdb-in-status"; stc.insertBefore(holder, stc.firstChild); }
+        else a.insertAdjacentElement("afterend", holder);
       }
     }
-    // an enemy's profile: a box under the page header
+    // an enemy's profile: a "Dibs" section just above Actions, in Torn's own style
     var pm = location.href.match(/profiles\.php\?XID=(\d+)/i);
-    var box = document.getElementById("gdb-prof");
+    var sec = document.querySelector(".gdb-psec"), box = document.getElementById("gdb-prof");
     if (pm && T[pm[1]]) {
-      if (!box) {
+      if (sec || box) return;
+      var act = leaf("Actions"), wrap = act;
+      while (wrap && wrap.parentElement && !wrap.querySelector('a[href*="sid=attack"], button, [class*="button"]')) wrap = wrap.parentElement;
+      if (act && wrap && wrap.parentElement && wrap !== document.body) {
+        var title = act; while (title.parentElement !== wrap) title = title.parentElement;
+        var body = title.nextElementSibling;
+        sec = wrap.cloneNode(false); sec.className += " gdb-psec"; sec.removeAttribute("id");
+        var t2 = title.cloneNode(false); t2.textContent = "\u270b Dibs"; t2.removeAttribute("id");
+        var b2 = body ? body.cloneNode(false) : document.createElement("div"); b2.removeAttribute("id"); b2.className += " gdb-pbody";
+        b2.innerHTML = '<span class="gdb-cell gdb-pcell" data-gdb-id="' + pm[1] + '"></span>';
+        sec.appendChild(t2); sec.appendChild(b2);
+        wrap.parentElement.insertBefore(sec, wrap);
+      } else {
         box = document.createElement("div"); box.id = "gdb-prof";
         box.innerHTML = '<span class="gdb-pt">\u270b Dibs: <b>' + esc(T[pm[1]][0]) + '</b></span><span class="gdb-cell" data-gdb-id="' + pm[1] + '"></span>';
         document.body.appendChild(box);
       }
-    } else if (box) box.remove();
+    } else { if (sec) sec.remove(); if (box) box.remove(); }
   }
 
   // ---- your own call, pinned at the bottom of the screen ----
@@ -236,6 +295,12 @@
     ".gdb-cell{display:inline-flex;align-items:center;gap:4px;margin-left:6px;vertical-align:middle;font:bold 11px Arial,sans-serif}",
     ".gdb-cell:empty{display:none}",
     ".gdb-cell.gdb-in-status{margin:0 4px 0 0}",
+    ".gdb-cell.gdb-wide{margin:0;gap:6px;font-size:12px}",
+    ".gdb-pbody{display:flex;justify-content:center;align-items:center;padding:10px 8px}",
+    ".gdb-pcell{margin:0;gap:12px;font-size:15px}",
+    ".gdb-pcell .gdb-btn{font:bold 15px Arial,sans-serif;padding:10px 30px;border-radius:5px;background:linear-gradient(#6b6b6b,#3b3b3b);color:#fff;border:1px solid #1d1d1d;box-shadow:inset 0 1px 0 rgba(255,255,255,.15)}",
+    ".gdb-pcell .gdb-btn:not(.gdb-off){background:linear-gradient(#5fa84a,#2f6a22);border-color:#1f4a16}",
+    ".gdb-pcell .gdb-btn.gdb-off{color:#aaa}",
     ".gdb-btn{border:0;border-radius:4px;padding:3px 8px;font:bold 11px Arial,sans-serif;background:#2dd4bf;color:#04201c;cursor:pointer;touch-action:manipulation;-webkit-user-select:none;user-select:none;text-decoration:none;display:inline-block}",
     ".gdb-btn.gdb-off{background:#3a3a3a;color:#888;cursor:default}",
     ".gdb-btn.gdb-un{background:#444;color:#eee}",
