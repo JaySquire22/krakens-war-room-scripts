@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Glory Dibs ✋
 // @namespace    jay-glory-dibs
-// @version      0.2.4
+// @version      0.2.5
 // @description  Call buttons for Glory Command Dibs on the war page, enemy faction pages and enemy profiles. By -TheKraken- [3616083].
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/factions.php*
@@ -186,16 +186,22 @@
   function pullLeft(mem) {
     var link = mem.querySelector('a[href*="profiles.php?XID="]');
     if (!link) return 0;
-    var top = link; while (top.parentElement && top.parentElement !== mem) top = top.parentElement;
-    var cell = box(mem), lb = box(link), dotRight = cell.left;
-    // the online dot / icons: everything visible in the cell that isn't the name
-    for (var i = 0; i < mem.children.length; i++) {
-      var c = mem.children[i]; if (c === top) continue;
-      var b = box(c); if (b.width > 0 && b.right <= lb.left + 1) dotRight = Math.max(dotRight, b.right);
+    var cell = box(mem), lb = box(link), dot = null, dotRight = cell.left;
+    // the online dot / small icons left of the name (they can sit in the same wrapper as the name)
+    var all = mem.querySelectorAll("*");
+    for (var i = 0; i < all.length; i++) {
+      var e = all[i];
+      if (e === link || e.contains(link) || link.contains(e)) continue;
+      var b = box(e);
+      if (!(b.width > 0) || b.width > 40 || b.right > lb.left + 1) continue;
+      if (b.right > dotRight) { dotRight = b.right; dot = e; }
     }
+    // move only the name: the highest wrapper of the name that doesn't also hold the dot
+    var slide = link;
+    while (slide.parentElement && slide.parentElement !== mem && !(dot && slide.parentElement.contains(dot))) slide = slide.parentElement;
     var gap = Math.round(lb.left - dotRight - 4);
-    if (gap > 2 && !top.getAttribute("data-gdb-slid")) { top.setAttribute("data-gdb-slid", "1"); top.style.transform = "translateX(-" + gap + "px)"; }
-    else if (!(gap > 2)) gap = 0;
+    if (!(gap > 2)) gap = 0;
+    else if (!slide.getAttribute("data-gdb-slid")) { slide.setAttribute("data-gdb-slid", "1"); slide.style.transform = "translateX(-" + gap + "px)"; }
     return Math.ceil(lb.right - gap - cell.left + 6); // right edge of the name after sliding, plus a little room
   }
   function setW(el, w) { el.style.cssText += ";width:" + w + "px;max-width:" + w + "px;flex:0 0 " + w + "px"; }
