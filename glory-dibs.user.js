@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Glory Dibs ✋
 // @namespace    jay-glory-dibs
-// @version      0.2.3
+// @version      0.2.4
 // @description  Call buttons for Glory Command Dibs on the war page, enemy faction pages and enemy profiles. By -TheKraken- [3616083].
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/factions.php*
@@ -181,25 +181,22 @@
     for (var i = 0; i < row.children.length; i++) if (link && row.children[i].contains(link)) return row.children[i];
     return null;
   }
-  // the name (honor bar) sits right after the online dot, with no gap where the badge was
+  // Slide the name (honor bar) left so it sits just after the online dot, then return the width the
+  // member cell needs to show the dot and the WHOLE name (the name itself is never shrunk or cut).
   function pullLeft(mem) {
     var link = mem.querySelector('a[href*="profiles.php?XID="]');
-    if (!link) return;
+    if (!link) return 0;
     var top = link; while (top.parentElement && top.parentElement !== mem) top = top.parentElement;
-    top.style.marginLeft = "4px"; top.style.left = "auto";
-    mem.style.justifyContent = "flex-start";
-  }
-  // width the member cell really needs: the online dot + the name picture + a little padding
-  function neededWidth(mem) {
-    var w = 14, link = mem.querySelector('a[href*="profiles.php?XID="]');
+    var cell = box(mem), lb = box(link), dotRight = cell.left;
+    // the online dot / icons: everything visible in the cell that isn't the name
     for (var i = 0; i < mem.children.length; i++) {
-      var c = mem.children[i], b = box(c);
-      if (!(b.width > 0)) continue;
-      // the name's wrapper can be wider than the picture itself: count the picture
-      if (link && c.contains(link)) { var lb = box(link); w += Math.max(lb.width, 40) + 4; }
-      else w += b.width;
+      var c = mem.children[i]; if (c === top) continue;
+      var b = box(c); if (b.width > 0 && b.right <= lb.left + 1) dotRight = Math.max(dotRight, b.right);
     }
-    return Math.round(w);
+    var gap = Math.round(lb.left - dotRight - 4);
+    if (gap > 2 && !top.getAttribute("data-gdb-slid")) { top.setAttribute("data-gdb-slid", "1"); top.style.transform = "translateX(-" + gap + "px)"; }
+    else if (!(gap > 2)) gap = 0;
+    return Math.ceil(lb.right - gap - cell.left + 6); // right edge of the name after sliding, plus a little room
   }
   function setW(el, w) { el.style.cssText += ";width:" + w + "px;max-width:" + w + "px;flex:0 0 " + w + "px"; }
   function wideRow(row, H) {
@@ -211,13 +208,11 @@
       // the badge's room goes to the Timer/Dibs columns: names pulled left, member column narrowed to fit them
       var mem = memberCell(row), mw = mem ? box(mem).width : 0;
       if (mem && H.mx == null) H.mx = box(mem).left;
-      var freed = hideBadge(row);
-      if (mem) pullLeft(mem);
-      if (mem && H.give == null) {
-        var need = neededWidth(mem);
-        H.give = need > 60 && need < mw - 8 ? Math.round(mw - need) : 0;
-        if (H.give < freed) H.give = freed; // never less room than the badge itself gave back
-      }
+      hideBadge(row);
+      var need = mem ? pullLeft(mem) : 0;
+      // the column is trimmed to fit the dot and the whole name (measured on the first row)
+      if (mem && H.give == null) H.give = need > 60 && need < mw - 8 ? Math.round(mw - need) : 0;
+      // honor-bar names are all the same size, so every row (and the header) gets the same trim
       var give = mem && H.give && mw - H.give > 60 ? H.give : 0;
       if (give) setW(mem, mw - give);
       var w = H.w + give;
