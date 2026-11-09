@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Sandbox War Room 🧪
 // @namespace    jay-torn-war-script-sandbox
-// @version      1.99.55
+// @version      1.99.56
 // @downloadURL  https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @updateURL    https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @description  [SANDBOX - test build, not for general use] Enemy hospital timers, quick attack links, and a chain timeout alert overlay for Torn faction war pages. Works in Tampermonkey (Firefox) and Torn PDA.
@@ -582,7 +582,7 @@ const __twsOuter = (() => {
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.55';
+  const SCRIPT_VERSION = '1.99.56';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -5308,6 +5308,46 @@ const __twsOuter = (() => {
     prefsFrame = null;
   }
 
+  // ---------------------------------------------------------------------
+  // Torn pages that War Room loads in its own frames (pop-outs, pre-loaded
+  // pages, the armoury) would each open their own connection to Torn's chat.
+  // Torn only keeps a few chat connections per player, so the real chat on
+  // the main page kept dropping and reconnecting. Every time one of our
+  // frames starts a new page, the chat connection inside it is switched off
+  // before Torn's chat starts (checked every 10ms until the page has loaded).
+  // ---------------------------------------------------------------------
+  function frameNoChat(w) {
+    try {
+      if (!w || w.__twsNoChat) return;
+      w.__twsNoChat = true;
+      const Real = w.WebSocket;
+      if (typeof Real !== 'function') return;
+      const Guard = function (url, protocols) {
+        if (/chat|centrifugo/i.test(String(url))) {
+          // a socket that never connects: Torn's hidden chat in this frame just stays offline
+          return { url: String(url), readyState: 3, bufferedAmount: 0, protocol: '', extensions: '', binaryType: 'blob',
+            send() {}, close() {}, addEventListener() {}, removeEventListener() {}, dispatchEvent() { return false; } };
+        }
+        return protocols === undefined ? new Real(url) : new Real(url, protocols);
+      };
+      Guard.prototype = Real.prototype;
+      Guard.CONNECTING = 0; Guard.OPEN = 1; Guard.CLOSING = 2; Guard.CLOSED = 3;
+      w.WebSocket = Guard;
+    } catch (e) { /* another site or no access: leave it */ }
+  }
+  function guardFrameChat(el) {
+    if (!el || el.__twsChatTimer) return;
+    const stopAt = Date.now() + 20000;
+    const stop = () => { clearInterval(el.__twsChatTimer); el.__twsChatTimer = null; };
+    el.__twsChatTimer = setInterval(() => {
+      if (!el.isConnected || Date.now() > stopAt) { stop(); return; }
+      let w = null;
+      try { w = el.contentWindow; } catch (e) { /* ignore */ }
+      frameNoChat(w);
+      try { if (w && w.document && w.document.readyState === 'complete' && w.location.href !== 'about:blank') stop(); } catch (e) { stop(); }
+    }, 10);
+  }
+
   // Kept alive in the background (like the blood/armoury frame) instead of
   // loading fresh on every use. Always cache-busted so it's never served a
   // stale copy from the browser's HTTP cache.
@@ -6864,6 +6904,7 @@ const __twsOuter = (() => {
     });
     el.src = BLOOD_URL;
     document.body.appendChild(el);
+    guardFrameChat(el);
     return frame;
   }
 
@@ -7311,6 +7352,7 @@ const __twsOuter = (() => {
       } catch (e) {
         if (popout.currentUrl) popout.frame.src = popout.currentUrl;
       }
+      guardFrameChat(popout.frame);
     });
     popout.bagEl.addEventListener('click', () => runBestBag());
     const toggleMin = () => {
@@ -7402,6 +7444,7 @@ const __twsOuter = (() => {
         });
       }
       f.setAttribute('src', u);
+      guardFrameChat(f);
     });
   }
 
@@ -7431,6 +7474,7 @@ const __twsOuter = (() => {
       if (pre) pre.dataset.loaded = '1';
       try { kiArmPopoutFrame(popout.frame, url); } catch (e) { /* ignore */ }
       popout.frame.setAttribute('src', url);
+      guardFrameChat(popout.frame);
     }
   }
 
