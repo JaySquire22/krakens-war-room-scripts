@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         Glory Dibs ✋
+// @name         Dibs Caller ✋
 // @namespace    jay-glory-dibs
-// @version      0.2.9
+// @version      0.3.0
 // @description  Call buttons for Glory Command Dibs on the war page, enemy faction pages and enemy profiles. By -TheKraken- [3616083].
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/factions.php*
@@ -22,7 +22,7 @@
 (function () {
   "use strict";
   if (window.top !== window.self) return;
-  if (document.getElementById("gdb-fab")) return;
+  if (window.__gdbLoaded) return; window.__gdbLoaded = true;
   var API = "https://dashing-fish-54.eu-west-1.convex.site/chain/api";
   var CALL_FROM = 359, LATE = 15;
 
@@ -72,11 +72,11 @@
         S.st = null; S.err = (j && j.error) || "No answer";
         if (j && j.needAuth) { ME = null; set("me", null); }
         else S.denied = Date.now() + 10 * 60 * 1000; // not in the trial: ask again in 10 minutes
-        fab(); return;
+        ui(); return;
       }
       S.err = ""; S.st = j;
       if (j.nowMs && (S.rtt == null || q1 - q0 <= S.rtt * 1.5)) { S.skew = j.nowMs - (q0 + q1) / 2; S.rtt = S.rtt == null ? q1 - q0 : Math.min(q1 - q0, S.rtt * 1.2); }
-      fab();
+      ui();
     }).catch(function () { S.inFlight = false; });
   }
 
@@ -254,7 +254,7 @@
         var a = links[i], id = idOf(a);
         if (!id || !T[id]) continue;
         // not in chat, our own boxes, or War Room's panel (War Room shows its own Dibs buttons)
-        if (a.closest('[class*="chat"], #gdb-panel, #gdb-called, #gdb-prof, .gdb-psec, [id^="tws-"], [class*="tws-"], [id^="kwr-"], [class*="kwr-"]')) continue;
+        if (a.closest('[class*="chat"], #gdb-panel, #gdb-called, #gdb-bar, #gdb-prof, .gdb-psec, [id^="tws-"], [class*="tws-"], [id^="kwr-"], [class*="kwr-"]')) continue;
         var holder, row = a.closest("li") || a.closest("tr");
         H = H || memberHeader(a);
         var cellEl = H && row ? wideRow(row, H) : null;
@@ -304,18 +304,25 @@
     } else { if (sec) sec.remove(); if (box) box.remove(); }
   }
 
-  // ---- your own call, pinned at the bottom of the screen ----
+  // ---- your own call: in the Dibs Caller bar, or pinned at the bottom of the screen where there's no bar ----
   function called() {
-    var el = document.getElementById("gdb-called");
-    // War Room shows your call at the top of its own list, so no second bar when it's on the page
+    var el = document.getElementById("gdb-called"), bar = document.getElementById("gdb-bar");
+    // War Room shows your call at the top of its own list, so no second one when it's on the page
     var wr = document.querySelector('[id^="tws-"], [class*="tws-row"]');
     var d = active() && !wr ? (S.st.dibs || []).filter(function (x) { return x.by === ME.pid; })[0] : null;
     if (!d) { if (el) el.remove(); return; }
-    if (!el) { el = document.createElement("div"); el.id = "gdb-called"; document.body.appendChild(el); }
+    var home = bar ? bar.querySelector(".gdb-bc") : document.body;
+    if (el && el.parentNode !== home) { el.remove(); el = null; }
+    if (!el) { el = document.createElement("div"); el.id = "gdb-called"; home.appendChild(el); el.__h = ""; }
+    el.className = bar ? "gdb-inbar" : "";
     var t = (S.st.targets && S.st.targets[String(d.t)]) || ["#" + d.t], now = nowS(), left = timer(t, now);
     var line = left != null ? (t[1] === "Traveling" ? "lands in ~" : "out in ") + dur(left) : d.outAt ? "hit within " + dur((S.st.holdSec || 180) - (now - d.outAt)) : "out now";
     var h = '<span class="gdb-ct">\u270b Called: <b>' + esc(t[0]) + "</b><br><small>" + line + " \u00b7 called " + tms(d.ms) + leftTxt(d.leftMs) + "</small></span>"
       + '<a class="gdb-btn gdb-atk" href="https://www.torn.com/loader.php?sid=attack&user2ID=' + d.t + '">ATK</a><button class="gdb-btn gdb-un" data-gdb-rel="' + d.t + '">\u21a9 Uncall</button>';
+    // slow flash while the target's showing Online (kept in step when it's redrawn)
+    var onl = t[3] === "on";
+    if (onl) h = h.replace("</b><br>", '</b> <span class="gdb-onltag">\ud83d\udfe2 Online</span><br>');
+    el.classList.toggle("gdb-onl", onl); el.style.animationDelay = onl ? (-(Date.now() % 2400)) + "ms" : "";
     if (el.__h !== h) { el.__h = h; el.innerHTML = h; }
   }
 
@@ -327,7 +334,8 @@
       var h = active() && ME ? cellFor(cells[i]) : "";
       if (cells[i].__h !== h) { cells[i].__h = h; cells[i].innerHTML = h; }
     }
-    if (ME) called();
+    ui();
+    if (ME) called(); else { var c = document.getElementById("gdb-called"); if (c) c.remove(); }
   }
 
   // ---- calling ----
@@ -365,41 +373,97 @@
     api({ op: "dibRelease", target: Number(id) }).then(function (j) { S.last = 0; toast(j && j.ok === false ? "\u2716 " + j.msg : "\u21a9 Uncalled.", j && j.ok === false ? "warn" : "ok"); }).catch(function () {});
   }, true);
 
-  // ---- sign in / status button ----
-  function fab() {
-    var f = document.getElementById("gdb-fab");
-    if (!f) { f = document.createElement("div"); f.id = "gdb-fab"; f.title = "Glory Dibs"; f.onclick = panel; document.body.appendChild(f); }
-    f.textContent = "\u270b"; f.className = !ME ? "out" : active() ? "on" : "idle";
+  // ---- Dibs Caller bar: fixed under Faction Description, can be minimised ----
+  // (pages without a Faction Description, like profiles, get the small round button instead)
+  function statusTxt() {
+    if (!ME) return "Not signed in";
+    var st = S.st;
+    if (st) return st.on ? "ON vs " + esc(st.enemyName || ("#" + st.enemyF)) : "Switched off";
+    return S.err ? "Not available" : "Checking\u2026";
+  }
+  function bodyHtml() {
+    var st = S.st;
+    return (ME
+      ? '<div>Signed in as <b>' + esc(ME.name) + '</b> [' + ME.pid + ']</div><div class="gdb-s">'
+        + (st ? (st.on ? "Dibs is ON against <b>" + esc(st.enemyName || ("#" + st.enemyF)) + "</b>." : "Dibs is switched off.") : (S.err ? "Not available: " + esc(S.err) : "Checking\u2026"))
+        + '</div><button class="gdb-btn gdb-un" data-gdb-out="1">Sign out</button>'
+      : '<div class="gdb-s">Sign in with your Torn API key (Public is enough). It is checked once by the Glory Command server and not stored.</div>'
+        + '<input class="gdb-key" maxlength="16" placeholder="API key" autocomplete="off"><button class="gdb-btn" data-gdb-in="1">Sign in</button><div class="gdb-msg"></div>')
+      + '<div class="gdb-s" style="margin-top:6px">Calls: hospital and flight timers only, from 5:59 down to 0:16. The first call to reach the server wins.</div>';
+  }
+  var anchorAt = 0;
+  function descAnchor() {
+    if (!/factions\.php/.test(location.href)) return null;
+    // look through the page's text (cheap) for the "Faction Description" heading
+    var w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null), n, hit = null;
+    while ((n = w.nextNode())) if (n.nodeValue.indexOf("Faction Description") >= 0 && n.nodeValue.replace(/\s+/g, " ").trim() === "Faction Description" && !(n.parentElement && n.parentElement.closest("#gdb-bar"))) { hit = n.parentElement; break; }
+    if (!hit) return null;
+    var a = hit; // the header box
+    while (a.parentElement && a.parentElement !== document.body && (a.parentElement.textContent || "").replace(/\s+/g, " ").trim() === "Faction Description") a = a.parentElement;
+    // the header and its description usually share a small wrapper: put the bar after the whole thing
+    var p = a.parentElement;
+    if (p && p !== document.body && p.children.length <= 3 && !p.querySelector('.table-body, .members-list, [class*="members"], [class*="ffscouter" i]')) a = p;
+    return a;
+  }
+  function bar() {
+    var b = document.getElementById("gdb-bar");
+    if (!b || !b.isConnected) {
+      if (Date.now() - anchorAt < 1500) return null; anchorAt = Date.now();
+      var an = descAnchor();
+      if (!an) return null;
+      if (!b) {
+        b = document.createElement("div"); b.id = "gdb-bar";
+        b.innerHTML = '<div class="gdb-bh" data-gdb-tog="1"><span class="gdb-bt">\u270b Dibs Caller</span><span class="gdb-bst"></span><span class="gdb-chev"></span></div><div class="gdb-bc"></div><div class="gdb-bb"></div>';
+      }
+      an.parentNode.insertBefore(b, an.nextSibling);
+    }
+    return b;
+  }
+  function ui() {
+    var b = bar(), f = document.getElementById("gdb-fab");
+    if (b) {
+      if (f) f.remove();
+      var pn = document.getElementById("gdb-panel"); if (pn) pn.remove();
+      var min = get("min") === "1";
+      b.classList.toggle("gdb-min", min);
+      b.className = b.className.replace(/\bgdb-(on|idle|out)\b/g, "").trim() + " " + (!ME ? "gdb-out" : active() ? "gdb-on" : "gdb-idle");
+      var st = b.querySelector(".gdb-bst"), h = statusTxt();
+      if (st.__h !== h) { st.__h = h; st.innerHTML = h; }
+      b.querySelector(".gdb-chev").textContent = min ? "\u25b8" : "\u25be";
+      var body = b.querySelector(".gdb-bb"), bh = bodyHtml();
+      if (body.__h !== bh) { body.__h = bh; body.innerHTML = bh; }
+      return;
+    }
+    // no Faction Description on this page: the small round button
+    if (!f) { f = document.createElement("div"); f.id = "gdb-fab"; f.title = "Dibs Caller"; f.onclick = panel; document.body.appendChild(f); }
+    f.textContent = "\u270b"; var fc = !ME ? "out" : active() ? "on" : "idle"; if (f.className !== fc) f.className = fc;
   }
   function panel() {
     var p = document.getElementById("gdb-panel");
     if (p) { p.remove(); return; }
     p = document.createElement("div"); p.id = "gdb-panel";
-    var st = S.st;
-    p.innerHTML = '<b>\u270b Glory Dibs</b> <span class="gdb-x" id="gdb-close">\u2715</span>'
-      + (ME
-        ? '<div>Signed in as <b>' + esc(ME.name) + '</b> [' + ME.pid + ']</div><div class="gdb-s">'
-          + (st ? (st.on ? "Dibs is ON against <b>" + esc(st.enemyName || ("#" + st.enemyF)) + "</b>." : "Dibs is switched off.") : (S.err ? "Not available: " + esc(S.err) : "Checking\u2026"))
-          + '</div><button class="gdb-btn gdb-un" id="gdb-out">Sign out</button>'
-        : '<div class="gdb-s">Sign in with your Torn API key (Public is enough). It is checked once by the Glory Command server and not stored.</div>'
-          + '<input id="gdb-key" maxlength="16" placeholder="API key" autocomplete="off"><button class="gdb-btn" id="gdb-in">Sign in</button><div id="gdb-msg"></div>')
-      + '<div class="gdb-s" style="margin-top:6px">Calls: hospital and flight timers only, from 5:59 down to 0:16. The first call to reach the server wins.</div>';
+    p.innerHTML = '<b>\u270b Dibs Caller</b> <span class="gdb-x" data-gdb-close="1">\u2715</span>' + bodyHtml();
     document.body.appendChild(p);
-    document.getElementById("gdb-close").onclick = function () { p.remove(); };
-    var o = document.getElementById("gdb-out"); if (o) o.onclick = function () { ME = null; set("me", null); S.st = null; p.remove(); fab(); tick(); };
-    var b = document.getElementById("gdb-in");
-    if (b) b.onclick = function () {
-      var k = document.getElementById("gdb-key").value.trim(), m = document.getElementById("gdb-msg");
-      if (!/^[A-Za-z0-9]{16}$/.test(k)) { m.textContent = "That doesn't look like a Torn API key."; return; }
-      b.textContent = "Checking\u2026";
-      post({ op: "keyLogin", key: k }).then(function (j) {
-        b.textContent = "Sign in";
-        if (!j || !j.pass) { m.textContent = (j && j.error) || "Sign-in failed"; return; }
-        ME = { pid: j.pid, name: j.name, f: j.f, pass: j.pass, exp: j.exp }; set("me", JSON.stringify(ME));
-        S.denied = 0; S.last = 0; p.remove(); fab(); tick();
-      }).catch(function () { b.textContent = "Sign in"; m.textContent = "Could not reach the server."; });
-    };
   }
+  function refresh() { var p = document.getElementById("gdb-panel"); if (p) p.remove(); var b = document.querySelector("#gdb-bar .gdb-bb"); if (b) b.__h = ""; ui(); tick(); }
+  document.addEventListener("click", function (e) {
+    var t = e.target;
+    if (!t.closest) return;
+    if (t.closest("[data-gdb-tog]")) { set("min", get("min") === "1" ? "0" : "1"); ui(); return; }
+    if (t.closest("[data-gdb-close]")) { var p = document.getElementById("gdb-panel"); if (p) p.remove(); return; }
+    if (t.closest("[data-gdb-out]")) { ME = null; set("me", null); S.st = null; refresh(); return; }
+    var bt = t.closest("[data-gdb-in]");
+    if (!bt) return;
+    var box = bt.parentNode, k = box.querySelector(".gdb-key").value.trim(), m = box.querySelector(".gdb-msg");
+    if (!/^[A-Za-z0-9]{16}$/.test(k)) { m.textContent = "That doesn't look like a Torn API key."; return; }
+    bt.textContent = "Checking\u2026";
+    post({ op: "keyLogin", key: k }).then(function (j) {
+      bt.textContent = "Sign in";
+      if (!j || !j.pass) { m.textContent = (j && j.error) || "Sign-in failed"; return; }
+      ME = { pid: j.pid, name: j.name, f: j.f, pass: j.pass, exp: j.exp }; set("me", JSON.stringify(ME));
+      S.denied = 0; S.last = 0; refresh();
+    }).catch(function () { bt.textContent = "Sign in"; m.textContent = "Could not reach the server."; });
+  });
 
   var css = document.createElement("style");
   css.textContent = [
@@ -431,17 +495,31 @@
     "#gdb-prof .gdb-cell{font-size:13px}#gdb-prof .gdb-btn{font-size:14px;padding:7px 14px}",
     "#gdb-called{position:fixed;left:8px;right:8px;bottom:8px;z-index:99998;display:flex;align-items:center;gap:6px;padding:7px 9px;border:1px solid #22c55e;border-radius:8px;background:#0f2a1c;color:#d1fae5;font:12px Arial,sans-serif;box-shadow:0 4px 14px rgba(0,0,0,.5)}",
     "#gdb-called .gdb-ct{flex:1}#gdb-called small{color:#9ad9b5}#gdb-called .gdb-btn{font-size:13px;padding:7px 12px}",
+    "#gdb-called.gdb-inbar{position:static;left:auto;right:auto;bottom:auto;z-index:auto;margin:0;border-radius:0;border-width:1px 0 0;box-shadow:none}",
+    "#gdb-called.gdb-onl{animation:gdbOnl 2.4s ease-in-out infinite}",
+    "@keyframes gdbOnl{0%,100%{border-color:#22c55e;background:#0f2a1c}50%{border-color:#ef4444;background:#3d1414}}",
+    ".gdb-onltag{font-size:10px;font-weight:bold;color:#fca5a5}",
+    "#gdb-bar{margin:10px 0;border-radius:5px;overflow:hidden;background:#2e2e2e;color:#ddd;font:12px Arial,sans-serif;box-shadow:0 1px 3px rgba(0,0,0,.4)}",
+    "#gdb-bar .gdb-bh{display:flex;align-items:center;gap:8px;padding:0 12px;height:34px;cursor:pointer;background:linear-gradient(#555,#333);color:#fff;font:bold 13px Arial,sans-serif;-webkit-user-select:none;user-select:none}",
+    "#gdb-bar .gdb-bt{flex:none}#gdb-bar .gdb-bst{flex:1;text-align:right;font-weight:normal;font-size:12px;color:#ccc;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}",
+    "#gdb-bar .gdb-bst::before{content:'';display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;background:#888;vertical-align:0}",
+    "#gdb-bar.gdb-on .gdb-bst::before{background:#2dd4bf}#gdb-bar.gdb-idle .gdb-bst::before{background:#f59e0b}#gdb-bar.gdb-out .gdb-bst::before{background:#ef4444}",
+    "#gdb-bar .gdb-chev{flex:none;width:12px;text-align:center;color:#ccc}",
+    "#gdb-bar .gdb-bb{padding:8px 12px 10px}#gdb-bar.gdb-min .gdb-bb{display:none}",
+    "#gdb-bar .gdb-s{color:#aaa;font-size:12px;margin:6px 0}",
+    "#gdb-bar input{width:100%;max-width:260px;box-sizing:border-box;margin:4px 8px 4px 0;padding:6px;background:#1b1b1b;color:#eee;border:1px solid #444;border-radius:5px;display:block}",
+    "#gdb-bar .gdb-btn{font-size:13px;padding:6px 12px}#gdb-bar .gdb-msg,#gdb-panel .gdb-msg{color:#ff8a8a;font-size:12px;margin-top:4px}",
     "#gdb-fab{position:fixed;right:10px;bottom:70px;z-index:99999;width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:20px;cursor:pointer;background:#161b26;border:2px solid #555;box-shadow:0 2px 8px rgba(0,0,0,.5)}",
     "#gdb-fab.on{border-color:#2dd4bf}#gdb-fab.idle{border-color:#f59e0b}#gdb-fab.out{border-color:#ef4444}",
     "#gdb-panel{position:fixed;right:10px;bottom:115px;z-index:99999;width:270px;background:#161b26;color:#eee;border:1px solid #333;border-radius:10px;padding:10px;font:13px Arial,sans-serif;box-shadow:0 6px 20px rgba(0,0,0,.6)}",
     "#gdb-panel .gdb-x{float:right;cursor:pointer;color:#aaa}#gdb-panel .gdb-s{color:#aaa;font-size:12px;margin:6px 0}",
     "#gdb-panel input{width:100%;box-sizing:border-box;margin:4px 0;padding:6px;background:#0b0f17;color:#eee;border:1px solid #333;border-radius:6px}",
-    "#gdb-panel .gdb-btn{font-size:13px;padding:6px 12px}#gdb-msg{color:#ff8a8a;font-size:12px;margin-top:4px}",
+    "#gdb-panel .gdb-btn{font-size:13px;padding:6px 12px}#gdb-panel input.gdb-key{display:block}",
     "#gdb-toast{display:none;position:fixed;left:8px;right:8px;top:8px;z-index:100000;padding:10px 12px;border-radius:8px;background:#222;color:#fff;font:13px Arial,sans-serif;box-shadow:0 4px 14px rgba(0,0,0,.6)}",
     "#gdb-toast.ok{background:#0f3d2a}#gdb-toast.bad{background:#4a1515}#gdb-toast.warn{background:#4a3410}"
   ].join("\n");
   document.head.appendChild(css);
-  fab();
+  ui();
   setInterval(tick, 250);
   tick();
 })();
