@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Glory Dibs ✋
 // @namespace    jay-glory-dibs
-// @version      0.1.3
+// @version      0.1.4
 // @description  Call buttons for Glory Command Dibs on the war page, enemy faction pages and enemy profiles. By -TheKraken- [3616083].
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/factions.php*
@@ -102,37 +102,59 @@
   // ---- put a holder next to each enemy name on the page ----
   function idOf(a) { var m = String(a.getAttribute("href") || "").match(/XID=(\d+)/i); return m ? m[1] : ""; }
   // ---- find Torn's own pieces by their visible text (class names change too often) ----
+  // the deepest element whose whole text is exactly `text` (headers often hold an extra sort icon)
   function leaf(text, root) {
-    var els = (root || document).querySelectorAll("div, span, li, h4, h5, p");
-    for (var i = 0; i < els.length; i++) if (els[i].childElementCount === 0 && els[i].textContent.trim() === text) return els[i];
-    return null;
+    var els = (root || document).querySelectorAll("div, span, li, h4, h5, p, a, button");
+    var best = null;
+    for (var i = 0; i < els.length; i++) {
+      if (els[i].textContent.trim() !== text) continue;
+      if (!best || best.contains(els[i])) best = els[i];
+    }
+    return best;
   }
-  // the member-list header with Position and Days columns (enemy faction page)
-  var HDR = null;
-  function memberHeader() {
-    if (HDR && HDR.row.isConnected) return HDR;
+  function box(el) { return el.getBoundingClientRect(); }
+  // the member list's Position and Days column headers (enemy faction page)
+  var HDR = null, hdrMiss = 0;
+  function memberHeader(link) {
+    if (HDR && HDR.p.isConnected && HDR.d.isConnected) return HDR;
     HDR = null;
-    var d = leaf("Days"), p = leaf("Position");
-    if (!d || !p) return null;
-    var row = d; while (row && !(row.contains(p) && row.childElementCount >= 4)) row = row.parentElement;
-    if (!row) return null;
-    var kid = function (el) { while (el.parentElement !== row) el = el.parentElement; return el; };
-    var pc = kid(p), dc = kid(d), kids = Array.prototype.slice.call(row.children);
-    HDR = { row: row, pos: kids.indexOf(pc), days: kids.indexOf(dc), n: kids.length, w: pc.offsetWidth + dc.offsetWidth };
-    // header: "Position" becomes "Dibs" across both columns
-    p.textContent = "Dibs"; dc.style.display = "none";
-    if (HDR.w > 40) pc.style.cssText += ";width:" + HDR.w + "px;max-width:" + HDR.w + "px;flex:0 0 " + HDR.w + "px";
+    if (Date.now() - hdrMiss < 3000) return null;
+    // search only the list around an enemy's link, not the whole page
+    var root = link; while (root && root !== document.body && !/Days/.test(root.textContent)) root = root.parentElement;
+    var d = root && leaf("Days", root), p = root && (leaf("Position", root) || leaf("Dibs", root));
+    if (!d || !p) { hdrMiss = Date.now(); return null; }
+    var cell = function (el) { while (el.parentElement && el.parentElement.childElementCount === 1) el = el.parentElement; return el; };
+    var pc = cell(p), dc = cell(d);
+    // remember where the columns sit before anything is hidden
+    HDR = { p: pc, d: dc, label: p, px: box(pc).left, dx: box(dc).left, w: box(pc).width + box(dc).width };
+    if (!(HDR.w > 0) || HDR.dx <= HDR.px) { HDR = null; hdrMiss = Date.now(); return null; }
     return HDR;
   }
+  // the child of `row` sitting under a header cell (same left edge)
+  function under(row, x) {
+    var kids = row.children;
+    for (var i = 0; i < kids.length; i++) if (Math.abs(box(kids[i]).left - x) < 6 && box(kids[i]).width > 0) return kids[i];
+    return null;
+  }
   function wideRow(row, H) {
-    var pc = row.children[H.pos], dc = row.children[H.days];
-    if (!pc || !dc) return null;
-    if (dc.style.display !== "none") dc.style.display = "none";
+    var pc = row.getAttribute("data-gdb-pc") === "1" ? row.querySelector('[data-gdb="1"]') : under(row, H.px);
+    if (!pc) return null;
     if (pc.getAttribute("data-gdb") !== "1") {
-      pc.setAttribute("data-gdb", "1"); pc.innerHTML = "";
-      if (H.w > 40) pc.style.cssText += ";width:" + H.w + "px;max-width:" + H.w + "px;flex:0 0 " + H.w + "px;display:flex;align-items:center;justify-content:center";
+      var dc = under(row, H.dx);
+      if (!dc || dc === pc) return null;
+      var w = H.w;
+      dc.style.display = "none";
+      pc.setAttribute("data-gdb", "1"); row.setAttribute("data-gdb-pc", "1"); pc.innerHTML = "";
+      pc.style.cssText += ";width:" + w + "px;max-width:" + w + "px;flex:0 0 " + w + "px;display:flex;align-items:center;justify-content:center;overflow:visible";
     }
     return pc;
+  }
+  function wideHeader(H) {
+    if (H.done) return;
+    var w = H.w;
+    H.label.textContent = "Dibs"; H.d.style.display = "none";
+    H.p.style.cssText += ";width:" + w + "px;max-width:" + w + "px;flex:0 0 " + w + "px";
+    H.done = true;
   }
   var lastAttach = 0;
   function attach() {
@@ -140,27 +162,25 @@
     lastAttach = Date.now();
     var T = S.st.targets || {};
     if (/factions\.php/i.test(location.href)) {
-      var H = memberHeader();
-      var links = document.querySelectorAll('a[href*="profiles.php?XID="]');
+      var links = document.querySelectorAll('a[href*="profiles.php?XID="]'), H = null;
       for (var i = 0; i < links.length; i++) {
         var a = links[i], id = idOf(a);
         if (!id || !T[id]) continue;
         if (a.closest('[class*="chat"], #gdb-panel, #gdb-called, #gdb-prof, .gdb-psec')) continue; // not in chat or our own boxes
-        var row = null;
-        if (H) { row = a; while (row && !(row.childElementCount === H.n && row.parentElement && row !== H.row && !row.contains(H.row))) row = row.parentElement; }
-        var holder;
-        if (row) {
+        var holder, row = a.closest("li") || a.closest("tr");
+        H = H || memberHeader(a);
+        var cellEl = H && row ? wideRow(row, H) : null;
+        if (cellEl) {
           // enemy faction page: Position + Days make room for the timer and Call button
-          var cellEl = wideRow(row, H);
-          if (!cellEl) continue;
-          Array.prototype.forEach.call(row.parentElement.children, function (r) { if (r.childElementCount === H.n) wideRow(r, H); });
+          wideHeader(H);
+          Array.prototype.forEach.call(row.parentElement.children, function (r) { wideRow(r, H); });
           if (cellEl.querySelector(".gdb-cell")) continue;
           holder = document.createElement("span"); holder.className = "gdb-cell gdb-wide"; holder.setAttribute("data-gdb-id", id);
           cellEl.appendChild(holder);
           continue;
         }
         // other faction lists (the war page): in the row's Status cell
-        row = a.closest("li") || a.closest("tr") || a.parentElement;
+        row = row || a.parentElement;
         if (!row || row.querySelector('.gdb-cell[data-gdb-id="' + id + '"]')) continue;
         holder = document.createElement("span"); holder.className = "gdb-cell"; holder.setAttribute("data-gdb-id", id);
         var cells = row.querySelectorAll('[class*="status"]'), stc = null;
@@ -180,12 +200,10 @@
       while (wrap && wrap.parentElement && !wrap.querySelector('a[href*="sid=attack"], button, [class*="button"]')) wrap = wrap.parentElement;
       if (act && wrap && wrap.parentElement && wrap !== document.body) {
         var title = act; while (title.parentElement !== wrap) title = title.parentElement;
-        var body = title.nextElementSibling;
         sec = wrap.cloneNode(false); sec.className += " gdb-psec"; sec.removeAttribute("id");
-        var t2 = title.cloneNode(false); t2.textContent = "\u270b Dibs"; t2.removeAttribute("id");
-        var b2 = body ? body.cloneNode(false) : document.createElement("div"); b2.removeAttribute("id"); b2.className += " gdb-pbody";
-        b2.innerHTML = '<span class="gdb-cell gdb-pcell" data-gdb-id="' + pm[1] + '"></span>';
-        sec.appendChild(t2); sec.appendChild(b2);
+        var t2 = title.cloneNode(false); t2.removeAttribute("id"); t2.className += " gdb-pbar";
+        t2.innerHTML = '<span>\u270b Dibs</span><span class="gdb-cell gdb-pcell" data-gdb-id="' + pm[1] + '"></span>';
+        sec.appendChild(t2);
         wrap.parentElement.insertBefore(sec, wrap);
       } else {
         box = document.createElement("div"); box.id = "gdb-prof";
@@ -296,9 +314,10 @@
     ".gdb-cell:empty{display:none}",
     ".gdb-cell.gdb-in-status{margin:0 4px 0 0}",
     ".gdb-cell.gdb-wide{margin:0;gap:6px;font-size:12px}",
-    ".gdb-pbody{display:flex;justify-content:center;align-items:center;padding:10px 8px}",
-    ".gdb-pcell{margin:0;gap:12px;font-size:15px}",
-    ".gdb-pcell .gdb-btn{font:bold 15px Arial,sans-serif;padding:10px 30px;border-radius:5px;background:linear-gradient(#6b6b6b,#3b3b3b);color:#fff;border:1px solid #1d1d1d;box-shadow:inset 0 1px 0 rgba(255,255,255,.15)}",
+    ".gdb-psec{min-height:0!important;height:auto!important;margin-bottom:8px}",
+    ".gdb-pbar{display:flex!important;align-items:center;justify-content:space-between;gap:8px}",
+    ".gdb-pcell{margin:0;gap:10px;font-size:13px}",
+    ".gdb-pcell .gdb-btn{font:bold 13px Arial,sans-serif;padding:5px 18px;border-radius:5px;background:linear-gradient(#6b6b6b,#3b3b3b);color:#fff;border:1px solid #1d1d1d;box-shadow:inset 0 1px 0 rgba(255,255,255,.15)}",
     ".gdb-pcell .gdb-btn:not(.gdb-off){background:linear-gradient(#5fa84a,#2f6a22);border-color:#1f4a16}",
     ".gdb-pcell .gdb-btn.gdb-off{color:#aaa}",
     ".gdb-btn{border:0;border-radius:4px;padding:3px 8px;font:bold 11px Arial,sans-serif;background:#2dd4bf;color:#04201c;cursor:pointer;touch-action:manipulation;-webkit-user-select:none;user-select:none;text-decoration:none;display:inline-block}",
