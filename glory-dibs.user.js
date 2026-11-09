@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Glory Dibs ✋
 // @namespace    jay-glory-dibs
-// @version      0.1.0
+// @version      0.1.1
 // @description  Call buttons for Glory Command Dibs on the war page, enemy faction pages and enemy profiles. By -TheKraken- [3616083].
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/factions.php*
@@ -30,9 +30,23 @@
   function get(k) { try { if (typeof GM_getValue === "function") { var v = GM_getValue(k, null); return v == null ? null : String(v); } } catch (e) {} try { return localStorage.getItem("gdb_" + k); } catch (e) { return null; } }
   function set(k, v) { try { if (typeof GM_setValue === "function") { GM_setValue(k, v == null ? null : String(v)); return; } } catch (e) {} try { if (v == null) localStorage.removeItem("gdb_" + k); else localStorage.setItem("gdb_" + k, v); } catch (e) {} }
   function esc(s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" }[c]; }); }
-  // plain text body = no CORS preflight, works the same in every browser and in Torn PDA
+  // Torn's pages block the browser's own fetch to other sites, so go through the userscript app:
+  // Torn PDA's PDA_httpPost, or the GM_xmlhttpRequest of Tampermonkey / Violentmonkey.
   function post(body) {
-    return fetch(API, { method: "POST", headers: { "Content-Type": "text/plain" }, body: JSON.stringify(body) }).then(function (r) { return r.json(); });
+    var data = JSON.stringify(body), headers = { "Content-Type": "application/json" };
+    var parse = function (t) { return typeof t === "string" ? JSON.parse(t) : t; };
+    if (typeof PDA_httpPost === "function") {
+      return Promise.resolve().then(function () { return PDA_httpPost(API, headers, data); })
+        .then(function (r) { return parse((r && (r.responseText || r.response || r.body)) || ""); });
+    }
+    if (typeof GM_xmlhttpRequest === "function") {
+      return new Promise(function (res, rej) {
+        GM_xmlhttpRequest({ method: "POST", url: API, headers: headers, data: data, timeout: 15000,
+          onload: function (r) { try { res(JSON.parse(r.responseText)); } catch (e) { rej(e); } },
+          onerror: function () { rej(new Error("network")); }, ontimeout: function () { rej(new Error("timeout")); } });
+      });
+    }
+    return fetch(API, { method: "POST", headers: { "Content-Type": "text/plain" }, body: data }).then(function (r) { return r.json(); });
   }
   var ME = null; try { ME = JSON.parse(get("me") || "null"); } catch (e) {}
   if (ME && !(ME.pass && ME.exp > Date.now())) ME = null;
