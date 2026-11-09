@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Glory Dibs ✋
 // @namespace    jay-glory-dibs
-// @version      0.2.8
+// @version      0.2.9
 // @description  Call buttons for Glory Command Dibs on the war page, enemy faction pages and enemy profiles. By -TheKraken- [3616083].
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/factions.php*
@@ -407,7 +407,7 @@
     ".gdb-cell:empty{display:none}",
     ".gdb-cell.gdb-in-status{margin:0 4px 0 0}",
     ".gdb-cell.gdb-wide{margin:0;gap:0;font-size:12px;width:100%;display:flex;align-items:center}",
-    ".gdb-tcol{display:block;flex:none;width:calc(100% - 96px);text-align:left;padding-left:6px;box-sizing:border-box;white-space:nowrap;overflow:hidden}",
+    ".gdb-tcol{display:block;flex:none;width:calc(100% - 96px);text-align:left;padding-left:6px;box-sizing:border-box;white-space:nowrap}",
     ".gdb-tcol .gdb-tm{display:inline}",
     ".gdb-dcol{display:flex;flex:none;width:96px;align-items:center;justify-content:flex-end;padding-right:6px;box-sizing:border-box;white-space:nowrap}",
     ".gdb-h{font-weight:bold}",
