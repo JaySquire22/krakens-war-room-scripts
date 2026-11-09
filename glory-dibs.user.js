@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Glory Dibs ✋
 // @namespace    jay-glory-dibs
-// @version      0.1.6
+// @version      0.1.7
 // @description  Call buttons for Glory Command Dibs on the war page, enemy faction pages and enemy profiles. By -TheKraken- [3616083].
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/factions.php*
@@ -57,7 +57,7 @@
   function nowS() { return (Date.now() + S.skew) / 1000; }
   function active() { return !!(S.st && S.st.on); }
   function pad(n) { return (n < 10 ? "0" : "") + n; }
-  function dur(s) { s = Math.max(0, Math.ceil(s - 0.001)); var h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60; return h ? h + "h " + pad(m) + "m " + pad(x) + "s" : m ? m + "m " + pad(x) + "s" : x + "s"; }
+  function dur(s) { s = Math.max(0, Math.ceil(s - 0.001)); var h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60; return h ? h + ":" + pad(m) + ":" + pad(x) : m + ":" + pad(x); }
   function tms(ms) { return new Date(ms).toISOString().slice(11, 23); }
   function leftTxt(ms) { if (!ms) return ""; var t = ms / 1000, m = Math.floor(t / 60); return " (" + (m ? m + "m " : "") + (t - m * 60).toFixed(1) + "s left)"; }
   function timer(t, now) { if (t[1] === "Hospital" && t[2] > now) return t[2] - now; if (t[1] === "Traveling" && t[6]) return t[6] - now; return null; }
@@ -126,7 +126,13 @@
     var cell = function (el) { while (el.parentElement && el.parentElement.childElementCount === 1) el = el.parentElement; return el; };
     var pc = cell(p), dc = cell(d);
     // remember where the columns sit before anything is hidden
-    HDR = { p: pc, d: dc, label: p, px: box(pc).left, dx: box(dc).left, w: box(pc).width + box(dc).width };
+    HDR = { p: pc, d: dc, label: p, px: box(pc).left, dx: box(dc).left, w: box(pc).width + box(dc).width, bw: 0, mw: 0 };
+    // the faction badge (the faction's tag picture next to each name): its width moves to the Dibs column
+    var badge = root.querySelector('a[href*="factions.php?step=profile"] img, [class*="faction"] img');
+    if (badge) {
+      var ba = badge.closest("a") || badge;
+      HDR.bw = Math.round(box(ba).width + 4);
+    }
     if (!(HDR.w > 0) || HDR.dx <= HDR.px) { HDR = null; hdrMiss = Date.now(); return null; }
     return HDR;
   }
@@ -142,8 +148,14 @@
     if (pc.getAttribute("data-gdb") !== "1") {
       var dc = under(row, H.dx);
       if (!dc || dc === pc) return null;
-      var w = H.w;
+      var w = H.w + H.bw;
       dc.style.display = "none";
+      if (H.bw) {
+        // hide the faction badge in this row and narrow the member cell by the same amount
+        var bl = row.querySelector('a[href*="factions.php?step=profile"]');
+        var memc = row.children[0];
+        if (bl && bl.querySelector("img")) { var bwid = box(bl).width; bl.style.display = "none"; if (memc && memc.contains(bl)) { var mw = box(memc).width; if (mw > 0) memc.style.cssText += ";width:" + (mw - H.bw) + "px;max-width:" + (mw - H.bw) + "px;flex:0 0 " + (mw - H.bw) + "px"; } }
+      }
       pc.setAttribute("data-gdb", "1"); row.setAttribute("data-gdb-pc", "1"); pc.innerHTML = "";
       pc.style.cssText += ";width:" + w + "px;max-width:" + w + "px;flex:0 0 " + w + "px;display:flex;align-items:center;justify-content:center;overflow:visible";
     }
@@ -151,7 +163,11 @@
   }
   function wideHeader(H) {
     if (H.done) return;
-    var w = H.w;
+    var w = H.w + H.bw;
+    if (H.bw) {
+      var mh = H.p.parentElement && H.p.parentElement.children[0];
+      if (mh && mh !== H.p) { var mhw = box(mh).width; if (mhw > 0) mh.style.cssText += ";width:" + (mhw - H.bw) + "px;max-width:" + (mhw - H.bw) + "px;flex:0 0 " + (mhw - H.bw) + "px"; }
+    }
     H.label.textContent = "Dibs"; H.d.style.display = "none";
     H.p.style.cssText += ";width:" + w + "px;max-width:" + w + "px;flex:0 0 " + w + "px";
     H.done = true;
