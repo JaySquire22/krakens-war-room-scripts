@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Glory Dibs ✋
 // @namespace    jay-glory-dibs
-// @version      0.1.8
+// @version      0.1.9
 // @description  Call buttons for Glory Command Dibs on the war page, enemy faction pages and enemy profiles. By -TheKraken- [3616083].
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/factions.php*
@@ -137,9 +137,25 @@
     for (var i = 0; i < kids.length; i++) if (Math.abs(box(kids[i]).left - x) < 6 && box(kids[i]).width > 0) return kids[i];
     return null;
   }
+  // the faction badge in a member row: a small picture (Torn's faction tag), never the name or the whole cell
+  function hideBadge(row) {
+    if (row.getAttribute("data-gdb-badge")) return;
+    row.setAttribute("data-gdb-badge", "1");
+    var imgs = row.querySelectorAll('img[src*="factiontag"], img[src*="faction_tag"], img[src*="/tags/"], a[href*="factions.php?step=profile"] img');
+    for (var i = 0; i < imgs.length; i++) {
+      var im = imgs[i];
+      if (im.closest('a[href*="profiles.php"]')) continue; // the honor bar / name
+      var el = im.parentElement && im.parentElement.tagName === "A" && im.parentElement.childElementCount === 1 ? im.parentElement : im;
+      var b = box(el);
+      if (b.width > 0 && b.width > 90) continue; // too big to be the badge: leave it
+      if (el.contains(row.querySelector('a[href*="profiles.php?XID="]'))) continue;
+      el.style.display = "none";
+    }
+  }
   function wideRow(row, H) {
     var pc = row.getAttribute("data-gdb-pc") === "1" ? row.querySelector('[data-gdb="1"]') : under(row, H.px);
     if (!pc) return null;
+    hideBadge(row);
     if (pc.getAttribute("data-gdb") !== "1") {
       var dc = under(row, H.dx);
       if (!dc || dc === pc) return null;
