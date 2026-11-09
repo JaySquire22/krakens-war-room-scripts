@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Glory Dibs ✋
 // @namespace    jay-glory-dibs
-// @version      0.2.7
+// @version      0.2.8
 // @description  Call buttons for Glory Command Dibs on the war page, enemy faction pages and enemy profiles. By -TheKraken- [3616083].
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/factions.php*
@@ -96,7 +96,8 @@
     var d = (st.dibs || []).filter(function (x) { return x.t === Number(id); })[0];
     var left = timer(t, nowS()), fly = t[1] === "Traveling", from = st.callFrom || CALL_FROM;
     var fg = fly ? flagOf(t[5]) : "";
-    var tm = left == null ? "" : fly && left <= 0 ? "\u2708 " + (fg ? fg + " " : "") + "landing" : (fly ? "\u2708 " + (fg ? fg + " " : "") : "") + dur(left);
+    // flights: flag, time, then the plane last (if space runs out, the plane is what gets cut); hospital: \ud83c\udfe5 first
+    var tm = left == null ? "" : fly ? (fg ? fg + " " : "") + (left <= 0 ? "landing" : dur(left)) + " \u2708" : "\ud83c\udfe5 " + dur(left);
     var cls = "gdb-tm" + (fly ? " gdb-fly" : "") + (left != null && left <= from && left > LATE ? " gdb-open" : "");
     var act;
     if (d && d.by === ME.pid) act = '<span class="gdb-yours">\u2705 Yours</span>';
@@ -406,7 +407,7 @@
     ".gdb-cell:empty{display:none}",
     ".gdb-cell.gdb-in-status{margin:0 4px 0 0}",
     ".gdb-cell.gdb-wide{margin:0;gap:0;font-size:12px;width:100%;display:flex;align-items:center}",
-    ".gdb-tcol{display:block;flex:none;width:calc(100% - 96px);text-align:left;padding-left:6px;box-sizing:border-box;white-space:nowrap}",
+    ".gdb-tcol{display:block;flex:none;width:calc(100% - 96px);text-align:left;padding-left:6px;box-sizing:border-box;white-space:nowrap;overflow:hidden}",
     ".gdb-tcol .gdb-tm{display:inline}",
     ".gdb-dcol{display:flex;flex:none;width:96px;align-items:center;justify-content:flex-end;padding-right:6px;box-sizing:border-box;white-space:nowrap}",
     ".gdb-h{font-weight:bold}",
