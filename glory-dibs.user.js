@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Glory Dibs ✋
 // @namespace    jay-glory-dibs
-// @version      0.1.1
+// @version      0.1.2
 // @description  Call buttons for Glory Command Dibs on the war page, enemy faction pages and enemy profiles. By -TheKraken- [3616083].
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/factions.php*
@@ -94,6 +94,10 @@
     if (left > (st.callFrom || CALL_FROM)) return '<span class="gdb-tm">' + tm + '</span><button class="gdb-btn gdb-off" disabled>Call</button>';
     return '<span class="gdb-tm gdb-open">' + tm + '</span><button class="gdb-btn" data-gdb-call="' + id + '">Call</button>';
   }
+  function cellFor(el) {
+    var h = cell(el.getAttribute("data-gdb-id"));
+    return el.className.indexOf("gdb-in-status") >= 0 ? h.replace(/<span class="gdb-tm[^"]*">[^<]*<\/span>/, "") : h;
+  }
 
   // ---- put a holder next to each enemy name on the page ----
   function idOf(a) { var m = String(a.getAttribute("href") || "").match(/XID=(\d+)/i); return m ? m[1] : ""; }
@@ -106,13 +110,18 @@
       for (var i = 0; i < links.length; i++) {
         var a = links[i], id = idOf(a);
         if (!id || !T[id]) continue;
-        if (a.closest('[class*="chat"], #gdb-panel, #gdb-called')) continue; // not in chat or our own boxes
-        if (!a.textContent.trim()) continue; // the avatar link: use the name link instead
-        var row = a.closest("li") || a.parentElement;
+        if (a.closest('[class*="chat"], #gdb-panel, #gdb-called, #gdb-prof')) continue; // not in chat or our own boxes
+        var row = a.closest("li") || a.closest("tr") || a.parentElement;
         if (!row || row.querySelector('.gdb-cell[data-gdb-id="' + id + '"]')) continue;
         var h = document.createElement("span");
         h.className = "gdb-cell"; h.setAttribute("data-gdb-id", id);
-        a.insertAdjacentElement("afterend", h);
+        // names are often honor-bar pictures, so the button goes in the row's Status cell (Okay / Hospital / Traveling...)
+        var cells = row.querySelectorAll('[class*="status"]'), stc = null;
+        for (var c = cells.length - 1; c >= 0; c--) {
+          if (/okay|hospital|travel|abroad|jail|fallen|fedded|federal|\d+:\d+/i.test(cells[c].textContent) && !cells[c].querySelector('[class*="status"]')) { stc = cells[c]; break; }
+        }
+        if (stc) { h.className += " gdb-in-status"; stc.insertBefore(h, stc.firstChild); }
+        else a.insertAdjacentElement("afterend", h);
       }
     }
     // an enemy's profile: a box under the page header
@@ -145,7 +154,7 @@
     attach();
     var cells = document.querySelectorAll(".gdb-cell[data-gdb-id]");
     for (var i = 0; i < cells.length; i++) {
-      var h = active() && ME ? cell(cells[i].getAttribute("data-gdb-id")) : "";
+      var h = active() && ME ? cellFor(cells[i]) : "";
       if (cells[i].__h !== h) { cells[i].__h = h; cells[i].innerHTML = h; }
     }
     if (ME) called();
@@ -226,6 +235,7 @@
   css.textContent = [
     ".gdb-cell{display:inline-flex;align-items:center;gap:4px;margin-left:6px;vertical-align:middle;font:bold 11px Arial,sans-serif}",
     ".gdb-cell:empty{display:none}",
+    ".gdb-cell.gdb-in-status{margin:0 4px 0 0}",
     ".gdb-btn{border:0;border-radius:4px;padding:3px 8px;font:bold 11px Arial,sans-serif;background:#2dd4bf;color:#04201c;cursor:pointer;touch-action:manipulation;-webkit-user-select:none;user-select:none;text-decoration:none;display:inline-block}",
     ".gdb-btn.gdb-off{background:#3a3a3a;color:#888;cursor:default}",
     ".gdb-btn.gdb-un{background:#444;color:#eee}",
