@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Sandbox War Room 🧪
 // @namespace    jay-torn-war-script-sandbox
-// @version      1.99.58
+// @version      1.99.59
 // @downloadURL  https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @updateURL    https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @description  [SANDBOX - test build, not for general use] Enemy hospital timers, quick attack links, and a chain timeout alert overlay for Torn faction war pages. Works in Tampermonkey (Firefox) and Torn PDA.
@@ -582,7 +582,7 @@ const __twsOuter = (() => {
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.58';
+  const SCRIPT_VERSION = '1.99.59';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -5685,7 +5685,9 @@ const __twsOuter = (() => {
     const left = dibTimer(t, now);
     const line = left != null ? (t[1] === 'Traveling' ? `lands in ~${fmtDuration(Math.max(0, Math.ceil(left)))}` : `out in ${fmtDuration(Math.ceil(left))}`)
       : d.outAt ? `hit within ${fmtDuration(Math.max(0, Math.ceil((st.holdSec || 180) - (now - d.outAt))))}` : 'out now';
-    return `<div class="kwr-dib-called"><span class="kwr-dib-ct">\u270b Called: <b>${escHtml(t[0])}</b><br><small>${line} \u00b7 called ${dibTime(d.ms)}${dibLeft(d.leftMs)}</small></span>`
+    // slow flash while the target's showing Online (the delay keeps it in step when the box is redrawn)
+    const onl = t[3] === 'on';
+    return `<div class="kwr-dib-called${onl ? ' kwr-dib-onl' : ''}"${onl ? ` style="animation-delay:-${Date.now() % 2400}ms"` : ''}><span class="kwr-dib-ct">\u270b Called: <b>${escHtml(t[0])}</b>${onl ? ' <span class="kwr-dib-onltag">\ud83d\udfe2 Online</span>' : ''}<br><small>${line} \u00b7 called ${dibTime(d.ms)}${dibLeft(d.leftMs)}</small></span>`
       + `<a class="tws-atk" target="_blank" href="${attackUrl(d.t)}">ATK</a><button class="kwr-dib-btn kwr-dib-un" data-dib-rel="${d.t}">\u21a9 Uncall</button></div>`;
   }
   function dibPrepHtml() {
@@ -9477,6 +9479,9 @@ const __twsOuter = (() => {
     .kwr-dib-taken i { color: #aaa; font-style: normal; }
     .kwr-dib-yours { font-size: 12px; }
     .kwr-dib-called { display: flex; align-items: center; gap: 6px; padding: 5px 6px; margin-bottom: 4px; border: 1px solid #22c55e; border-radius: 6px; background: rgba(34,197,94,.12); }
+    .kwr-dib-called.kwr-dib-onl { animation: kwrDibOnl 2.4s ease-in-out infinite; }
+    @keyframes kwrDibOnl { 0%, 100% { border-color: #22c55e; background: rgba(34,197,94,.12); box-shadow: none; } 50% { border-color: #ef4444; background: rgba(239,68,68,.22); box-shadow: 0 0 10px rgba(239,68,68,.4); } }
+    .kwr-dib-onltag { font-size: 10px; font-weight: 700; color: #fca5a5; }
     .kwr-dib-ct { flex: 1; font-size: 12px; color: #d1fae5; }
     .kwr-dib-ct small { color: #9ad9b5; font-size: 10px; }
     .tws-atk {
