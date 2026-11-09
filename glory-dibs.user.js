@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Glory Dibs ✋
 // @namespace    jay-glory-dibs
-// @version      0.2.1
+// @version      0.2.2
 // @description  Call buttons for Glory Command Dibs on the war page, enemy faction pages and enemy profiles. By -TheKraken- [3616083].
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/factions.php*
@@ -181,6 +181,19 @@
     for (var i = 0; i < row.children.length; i++) if (link && row.children[i].contains(link)) return row.children[i];
     return null;
   }
+  // the name (honor bar) sits right after the online dot, with no gap where the badge was
+  function pullLeft(mem) {
+    var link = mem.querySelector('a[href*="profiles.php?XID="]');
+    if (!link) return;
+    var top = link; while (top.parentElement && top.parentElement !== mem) top = top.parentElement;
+    top.style.marginLeft = "4px"; top.style.left = "auto";
+  }
+  // right edge of what's still showing in the member cell
+  function contentRight(mem) {
+    var r = box(mem).left;
+    for (var i = 0; i < mem.children.length; i++) { var b = box(mem.children[i]); if (b.width > 0) r = Math.max(r, b.right); }
+    return r;
+  }
   function setW(el, w) { el.style.cssText += ";width:" + w + "px;max-width:" + w + "px;flex:0 0 " + w + "px"; }
   function wideRow(row, H) {
     var pc = row.getAttribute("data-gdb-pc") === "1" ? row.querySelector('[data-gdb="1"]') : under(row, H.px);
@@ -188,12 +201,13 @@
     if (pc.getAttribute("data-gdb") !== "1") {
       var dc = under(row, H.dx);
       if (!dc || dc === pc) return null;
-      // the badge's room goes to the Timer/Dibs columns: names shift left, member column narrows by the same
+      // the badge's room goes to the Timer/Dibs columns: names pulled left, member column narrowed to fit them
       var mem = memberCell(row), mw = mem ? box(mem).width : 0;
       if (mem && H.mx == null) H.mx = box(mem).left;
-      var freed = hideBadge(row);
-      if (freed > 0 && !H.bw) H.bw = freed;
-      var give = freed > 0 && mw - H.bw > 100 ? H.bw : 0;
+      hideBadge(row);
+      if (mem) pullLeft(mem);
+      if (mem && H.give == null) { var need = contentRight(mem) - box(mem).left + 8; H.give = need > 60 && need < mw ? Math.round(mw - need) : 0; }
+      var give = mem && H.give && mw - H.give > 60 ? H.give : 0;
       if (give) setW(mem, mw - give);
       var w = H.w + give;
       dc.style.display = "none";
@@ -205,9 +219,9 @@
   function wideHeader(H) {
     if (H.done) return;
     var hr = H.p.parentElement, give = 0;
-    if (H.bw && H.mx != null && hr) {
+    if (H.give && H.mx != null && hr) {
       var hm = under(hr, H.mx), hw = hm ? box(hm).width : 0;
-      if (hm && hw - H.bw > 100) { setW(hm, hw - H.bw); give = H.bw; }
+      if (hm && hw - H.give > 60) { setW(hm, hw - H.give); give = H.give; }
     }
     var w = H.w + give;
     H.d.style.display = "none";
@@ -235,12 +249,15 @@
           // enemy faction page: Position + Days make room for the timer and Call button
           wideHeader(H);
           Array.prototype.forEach.call(row.parentElement.children, function (r) { wideRow(r, H); });
+          var olds = row.querySelectorAll(".gdb-cell.gdb-in-status, .gdb-cell:not(.gdb-wide)");
+          for (var o = 0; o < olds.length; o++) if (!cellEl.contains(olds[o])) olds[o].remove();
           if (cellEl.querySelector(".gdb-cell")) continue;
           holder = document.createElement("span"); holder.className = "gdb-cell gdb-wide"; holder.setAttribute("data-gdb-id", id);
           cellEl.appendChild(holder);
           continue;
         }
         // other faction lists (the war page): in the row's Status cell
+        if (H) continue; // this page has the Timer/Dibs columns: no second button
         row = row || a.parentElement;
         if (!row || row.querySelector('.gdb-cell[data-gdb-id="' + id + '"]')) continue;
         holder = document.createElement("span"); holder.className = "gdb-cell"; holder.setAttribute("data-gdb-id", id);
