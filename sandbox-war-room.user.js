@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Sandbox War Room 🧪
 // @namespace    jay-torn-war-script-sandbox
-// @version      1.99.56
+// @version      1.99.57
 // @downloadURL  https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @updateURL    https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @description  [SANDBOX - test build, not for general use] Enemy hospital timers, quick attack links, and a chain timeout alert overlay for Torn faction war pages. Works in Tampermonkey (Firefox) and Torn PDA.
@@ -582,7 +582,7 @@ const __twsOuter = (() => {
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.56';
+  const SCRIPT_VERSION = '1.99.57';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -5674,6 +5674,7 @@ const __twsOuter = (() => {
     const left = dibTimer(t, dibNow());
     if (left == null) return '';
     if (left <= 15) return '<button class="kwr-dib-btn kwr-dib-off" disabled>Late</button>';
+    if (left > (st.callFrom || 359) && left <= (st.callFrom || 359) + 30) return `<button class="kwr-dib-btn kwr-dib-prep" data-dib-prep="${escHtml(String(id))}">Prepare</button>`;
     if (left > (st.callFrom || 359)) return '<button class="kwr-dib-btn kwr-dib-off" disabled>Call</button>';
     return `<button class="kwr-dib-btn" data-dib-call="${escHtml(String(id))}">Call</button>`;
   }
@@ -5687,9 +5688,34 @@ const __twsOuter = (() => {
     return `<div class="kwr-dib-called"><span class="kwr-dib-ct">\u270b Called: <b>${escHtml(t[0])}</b><br><small>${line} \u00b7 called ${dibTime(d.ms)}${dibLeft(d.leftMs)}</small></span>`
       + `<a class="tws-atk" target="_blank" href="${attackUrl(d.t)}">ATK</a><button class="kwr-dib-btn kwr-dib-un" data-dib-rel="${d.t}">\u21a9 Uncall</button></div>`;
   }
+  function dibPrepHtml() {
+    const st = DIB.st, id = DIB.prep, t = st && st.targets && st.targets[String(id)];
+    if (!t) return '';
+    const d = (st.dibs || []).find((x) => x.t === Number(id));
+    const now = dibNow(), left = dibTimer(t, now), from = st.callFrom || 359;
+    let btn;
+    if (d) btn = `<button class="kwr-prep-call kwr-dib-off" disabled>${d.by === dibOwnId() ? '\u2705 Yours' : '\u270b ' + escHtml(d.byName)}</button>`;
+    else if (left == null) btn = '<button class="kwr-prep-call kwr-dib-off" disabled>Out</button>';
+    else if (left <= 15) btn = '<button class="kwr-prep-call kwr-dib-off" disabled>Late</button>';
+    else if (left > from) btn = `<button class="kwr-prep-call kwr-dib-off" disabled>Call in ${fmtDuration(Math.ceil(left - from))}</button>`;
+    else btn = `<button class="kwr-prep-call" data-dib-call="${escHtml(String(id))}">Call</button>`;
+    const tm = left == null ? escHtml(t[1] || '') : (t[1] === 'Traveling' ? '\u2708 ' : 'Hosp ') + fmtDuration(Math.max(0, Math.ceil(left)));
+    return `<div class="kwr-prep-card"><div class="kwr-prep-l" data-dib-prep-close="1"><b>${escHtml(t[0])}</b><span>${tm}</span></div>${btn}</div>`;
+  }
+  function dibPrepRender(on) {
+    let box = document.getElementById('kwr-dib-prepbox');
+    const h = on && DIB.prep ? dibPrepHtml() : '';
+    if (!h) { if (box) box.remove(); DIB.prep = null; return; }
+    if (!box) {
+      box = document.createElement('div'); box.id = 'kwr-dib-prepbox'; document.body.appendChild(box);
+      box.addEventListener('click', (e) => { if (e.target === box || (e.target.closest && e.target.closest('[data-dib-prep-close]'))) { DIB.prep = null; dibTick(); } });
+    }
+    if (box.__h !== h) { box.__h = h; box.innerHTML = h; }
+  }
   function dibTick() {
     dibPoll();
     const on = dibActive();
+    dibPrepRender(on);
     document.querySelectorAll('.kwr-dib[data-dib-id]').forEach((el) => { const h = on ? dibCellHtml(el.getAttribute('data-dib-id')) : ''; if (el.__h !== h) { el.__h = h; el.innerHTML = h; } });
     const box = document.getElementById('kwr-dib-called');
     if (box) { const h = on ? dibCalledHtml() : ''; if (box.__h !== h) { box.__h = h; box.innerHTML = h; box.style.display = h ? '' : 'none'; } }
@@ -5713,8 +5739,11 @@ const __twsOuter = (() => {
     e.preventDefault(); e.stopPropagation();
     DIB.downAt = Date.now();
     dibCall(b.getAttribute('data-dib-call'));
+    if (b.classList.contains('kwr-prep-call')) { DIB.prep = null; setTimeout(dibTick, 0); }
   }, true);
   document.addEventListener('click', (e) => {
+    const pr = e.target.closest && e.target.closest('[data-dib-prep]');
+    if (pr) { e.preventDefault(); e.stopPropagation(); DIB.prep = Number(pr.getAttribute('data-dib-prep')); dibTick(); return; }
     const c = e.target.closest && e.target.closest('[data-dib-call]');
     if (c) { e.preventDefault(); e.stopPropagation(); return; } // already sent on touch
     const r = e.target.closest && e.target.closest('[data-dib-rel]');
@@ -9426,6 +9455,14 @@ const __twsOuter = (() => {
     .kwr-dib-btn { border: none; border-radius: 4px; padding: 3px 8px; font-size: 11px; font-weight: bold; background: #2dd4bf; color: #04201c; cursor: pointer; -webkit-user-select: none; user-select: none; touch-action: manipulation; }
     .kwr-dib-btn.kwr-dib-off { background: #333; color: #777; cursor: default; }
     .kwr-dib-btn.kwr-dib-un { background: #444; color: #eee; margin-left: 4px; }
+    .kwr-dib-btn.kwr-dib-prep { background: #f59e0b; color: #2a1a00; }
+    #kwr-dib-prepbox { position: fixed; inset: 0; z-index: 2147483000; background: rgba(0,0,0,.55); display: flex; align-items: center; justify-content: center; padding: 16px; }
+    .kwr-prep-card { width: 100%; max-width: 460px; display: flex; align-items: center; gap: 12px; padding: 16px 14px; border: 2px solid #f59e0b; border-radius: 12px; background: #1b1b1b; box-shadow: 0 8px 30px rgba(0,0,0,.6); }
+    .kwr-prep-l { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 8px; cursor: pointer; }
+    .kwr-prep-l b { font: bold 24px Arial, sans-serif; color: #fff; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .kwr-prep-l span { font: bold 18px Arial, sans-serif; color: #ff7c7c; background: rgba(239,68,68,.15); border-radius: 8px; padding: 6px 12px; }
+    .kwr-prep-call { min-width: 140px; min-height: 96px; border: none; border-radius: 12px; font: bold 24px Arial, sans-serif; background: #2dd4bf; color: #04201c; cursor: pointer; touch-action: manipulation; -webkit-user-select: none; user-select: none; }
+    .kwr-prep-call.kwr-dib-off { background: #333; color: #888; cursor: default; font-size: 18px; }
     .kwr-dib-taken { font-size: 10px; color: #ff8a8a; white-space: nowrap; }
     .kwr-dib-taken i { color: #aaa; font-style: normal; }
     .kwr-dib-yours { font-size: 12px; }
