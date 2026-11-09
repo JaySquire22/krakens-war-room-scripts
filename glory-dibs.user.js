@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Glory Dibs ✋
 // @namespace    jay-glory-dibs
-// @version      0.2.2
+// @version      0.2.3
 // @description  Call buttons for Glory Command Dibs on the war page, enemy faction pages and enemy profiles. By -TheKraken- [3616083].
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/factions.php*
@@ -187,12 +187,19 @@
     if (!link) return;
     var top = link; while (top.parentElement && top.parentElement !== mem) top = top.parentElement;
     top.style.marginLeft = "4px"; top.style.left = "auto";
+    mem.style.justifyContent = "flex-start";
   }
-  // right edge of what's still showing in the member cell
-  function contentRight(mem) {
-    var r = box(mem).left;
-    for (var i = 0; i < mem.children.length; i++) { var b = box(mem.children[i]); if (b.width > 0) r = Math.max(r, b.right); }
-    return r;
+  // width the member cell really needs: the online dot + the name picture + a little padding
+  function neededWidth(mem) {
+    var w = 14, link = mem.querySelector('a[href*="profiles.php?XID="]');
+    for (var i = 0; i < mem.children.length; i++) {
+      var c = mem.children[i], b = box(c);
+      if (!(b.width > 0)) continue;
+      // the name's wrapper can be wider than the picture itself: count the picture
+      if (link && c.contains(link)) { var lb = box(link); w += Math.max(lb.width, 40) + 4; }
+      else w += b.width;
+    }
+    return Math.round(w);
   }
   function setW(el, w) { el.style.cssText += ";width:" + w + "px;max-width:" + w + "px;flex:0 0 " + w + "px"; }
   function wideRow(row, H) {
@@ -204,9 +211,13 @@
       // the badge's room goes to the Timer/Dibs columns: names pulled left, member column narrowed to fit them
       var mem = memberCell(row), mw = mem ? box(mem).width : 0;
       if (mem && H.mx == null) H.mx = box(mem).left;
-      hideBadge(row);
+      var freed = hideBadge(row);
       if (mem) pullLeft(mem);
-      if (mem && H.give == null) { var need = contentRight(mem) - box(mem).left + 8; H.give = need > 60 && need < mw ? Math.round(mw - need) : 0; }
+      if (mem && H.give == null) {
+        var need = neededWidth(mem);
+        H.give = need > 60 && need < mw - 8 ? Math.round(mw - need) : 0;
+        if (H.give < freed) H.give = freed; // never less room than the badge itself gave back
+      }
       var give = mem && H.give && mw - H.give > 60 ? H.give : 0;
       if (give) setW(mem, mw - give);
       var w = H.w + give;
