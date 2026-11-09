@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Glory Dibs ✋
 // @namespace    jay-glory-dibs
-// @version      0.1.4
+// @version      0.1.5
 // @description  Call buttons for Glory Command Dibs on the war page, enemy faction pages and enemy profiles. By -TheKraken- [3616083].
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/factions.php*
@@ -166,7 +166,8 @@
       for (var i = 0; i < links.length; i++) {
         var a = links[i], id = idOf(a);
         if (!id || !T[id]) continue;
-        if (a.closest('[class*="chat"], #gdb-panel, #gdb-called, #gdb-prof, .gdb-psec')) continue; // not in chat or our own boxes
+        // not in chat, our own boxes, or War Room's panel (War Room shows its own Dibs buttons)
+        if (a.closest('[class*="chat"], #gdb-panel, #gdb-called, #gdb-prof, .gdb-psec, [id^="tws-"], [class*="tws-"], [id^="kwr-"], [class*="kwr-"]')) continue;
         var holder, row = a.closest("li") || a.closest("tr");
         H = H || memberHeader(a);
         var cellEl = H && row ? wideRow(row, H) : null;
