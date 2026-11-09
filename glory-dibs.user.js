@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Glory Dibs ✋
 // @namespace    jay-glory-dibs
-// @version      0.1.9
+// @version      0.2.0
 // @description  Call buttons for Glory Command Dibs on the war page, enemy faction pages and enemy profiles. By -TheKraken- [3616083].
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/factions.php*
@@ -81,22 +81,31 @@
   }
 
   // ---- the button for one enemy ----
-  function cell(id) {
+  function parts(id) {
     var st = S.st, t = st.targets && st.targets[String(id)];
-    if (!t) return "";
+    if (!t) return null;
     var d = (st.dibs || []).filter(function (x) { return x.t === Number(id); })[0];
-    if (d && d.by === ME.pid) return '<span class="gdb-yours">\u2705 Yours</span>';
-    if (d) return '<span class="gdb-taken">\u270b ' + esc(d.byName) + (d.myMs ? ' <i>+' + ((d.myMs - d.ms) / 1000).toFixed(2) + "s</i>" : "") + "</span>";
-    var left = timer(t, nowS());
-    if (left == null) return "";
-    var tm = (t[1] === "Traveling" ? "\u2708 " : "") + dur(left);
-    if (left <= LATE) return (t[1] === "Traveling" && left <= 0 ? '<span class="gdb-tm">\u2708 landing</span>' : "") + '<button class="gdb-btn gdb-off" disabled>Late</button>';
-    if (left > (st.callFrom || CALL_FROM)) return '<span class="gdb-tm">' + tm + '</span><button class="gdb-btn gdb-off" disabled>Call</button>';
-    return '<span class="gdb-tm gdb-open">' + tm + '</span><button class="gdb-btn" data-gdb-call="' + id + '">Call</button>';
+    var left = timer(t, nowS()), fly = t[1] === "Traveling", from = st.callFrom || CALL_FROM;
+    var tm = left == null ? "" : fly && left <= 0 ? "\u2708 landing" : (fly ? "\u2708 " : "") + dur(left);
+    var cls = "gdb-tm" + (fly ? " gdb-fly" : "") + (left != null && left <= from && left > LATE ? " gdb-open" : "");
+    var act;
+    if (d && d.by === ME.pid) act = '<span class="gdb-yours">\u2705 Yours</span>';
+    else if (d) act = '<span class="gdb-taken">\u270b ' + esc(d.byName) + (d.myMs ? ' <i>+' + ((d.myMs - d.ms) / 1000).toFixed(2) + "s</i>" : "") + "</span>";
+    else if (left == null) act = "";
+    else if (left <= LATE) act = '<button class="gdb-btn gdb-off" disabled>Late</button>';
+    else if (left > from) act = '<button class="gdb-btn gdb-off" disabled>Call</button>';
+    else act = '<button class="gdb-btn" data-gdb-call="' + id + '">Call</button>';
+    return { tm: tm, cls: cls, act: act };
   }
+  function cell(id) { var p = parts(id); return !p ? "" : (p.tm ? '<span class="' + p.cls + '">' + p.tm + "</span>" : "") + p.act; }
   function cellFor(el) {
-    var h = cell(el.getAttribute("data-gdb-id"));
-    return el.className.indexOf("gdb-in-status") >= 0 ? h.replace(/<span class="gdb-tm[^"]*">[^<]*<\/span>/, "") : h;
+    var id = el.getAttribute("data-gdb-id"), p;
+    if (el.className.indexOf("gdb-wide") >= 0) { // the faction page: separate Timer and Dibs columns
+      p = parts(id);
+      return p ? '<span class="gdb-tcol">' + (p.tm ? '<span class="' + p.cls + '">' + p.tm + "</span>" : "") + '</span><span class="gdb-dcol">' + p.act + "</span>" : "";
+    }
+    if (el.className.indexOf("gdb-in-status") >= 0) { p = parts(id); return p ? p.act : ""; } // Torn's own timer is right there
+    return cell(id);
   }
 
   // ---- put a holder next to each enemy name on the page ----
@@ -139,38 +148,62 @@
   }
   // the faction badge in a member row: a small picture (Torn's faction tag), never the name or the whole cell
   function hideBadge(row) {
-    if (row.getAttribute("data-gdb-badge")) return;
+    if (row.getAttribute("data-gdb-badge")) return 0;
     row.setAttribute("data-gdb-badge", "1");
+    var link = row.querySelector('a[href*="profiles.php?XID="]'), freed = 0;
     var imgs = row.querySelectorAll('img[src*="factiontag"], img[src*="faction_tag"], img[src*="/tags/"], a[href*="factions.php?step=profile"] img');
     for (var i = 0; i < imgs.length; i++) {
       var im = imgs[i];
       if (im.closest('a[href*="profiles.php"]')) continue; // the honor bar / name
-      var el = im.parentElement && im.parentElement.tagName === "A" && im.parentElement.childElementCount === 1 ? im.parentElement : im;
+      var el = im;
+      // climb to the badge's own wrapper (one child each), never to anything holding the name
+      while (el.parentElement && el.parentElement !== row && el.parentElement.childElementCount === 1 && !(link && el.parentElement.contains(link))) el = el.parentElement;
       var b = box(el);
-      if (b.width > 0 && b.width > 90) continue; // too big to be the badge: leave it
-      if (el.contains(row.querySelector('a[href*="profiles.php?XID="]'))) continue;
+      if (b.width > 90 || (link && el.contains(link))) continue; // too big to be the badge: leave it
+      var cs = getComputedStyle(el);
+      freed += b.width + (parseFloat(cs.marginLeft) || 0) + (parseFloat(cs.marginRight) || 0);
       el.style.display = "none";
     }
+    return Math.round(freed);
   }
+  function memberCell(row) {
+    var link = row.querySelector('a[href*="profiles.php?XID="]');
+    for (var i = 0; i < row.children.length; i++) if (link && row.children[i].contains(link)) return row.children[i];
+    return null;
+  }
+  function setW(el, w) { el.style.cssText += ";width:" + w + "px;max-width:" + w + "px;flex:0 0 " + w + "px"; }
   function wideRow(row, H) {
     var pc = row.getAttribute("data-gdb-pc") === "1" ? row.querySelector('[data-gdb="1"]') : under(row, H.px);
     if (!pc) return null;
-    hideBadge(row);
     if (pc.getAttribute("data-gdb") !== "1") {
       var dc = under(row, H.dx);
       if (!dc || dc === pc) return null;
-      var w = H.w + H.bw;
+      // the badge's room goes to the Timer/Dibs columns: names shift left, member column narrows by the same
+      var mem = memberCell(row), mw = mem ? box(mem).width : 0;
+      if (mem && H.mx == null) H.mx = box(mem).left;
+      var freed = hideBadge(row);
+      if (freed > 0 && !H.bw) H.bw = freed;
+      var give = freed > 0 && mw - H.bw > 100 ? H.bw : 0;
+      if (give) setW(mem, mw - give);
+      var w = H.w + give;
       dc.style.display = "none";
       pc.setAttribute("data-gdb", "1"); row.setAttribute("data-gdb-pc", "1"); pc.innerHTML = "";
-      pc.style.cssText += ";width:" + w + "px;max-width:" + w + "px;flex:0 0 " + w + "px;display:flex;align-items:center;justify-content:center;overflow:visible";
+      pc.style.cssText += ";width:" + w + "px;max-width:" + w + "px;flex:0 0 " + w + "px;display:flex;align-items:center;overflow:visible";
     }
     return pc;
   }
   function wideHeader(H) {
     if (H.done) return;
-    var w = H.w + H.bw;
-    H.label.textContent = "Dibs"; H.d.style.display = "none";
-    H.p.style.cssText += ";width:" + w + "px;max-width:" + w + "px;flex:0 0 " + w + "px";
+    var hr = H.p.parentElement, give = 0;
+    if (H.bw && H.mx != null && hr) {
+      var hm = under(hr, H.mx), hw = hm ? box(hm).width : 0;
+      if (hm && hw - H.bw > 100) { setW(hm, hw - H.bw); give = H.bw; }
+    }
+    var w = H.w + give;
+    H.d.style.display = "none";
+    setW(H.p, w);
+    H.p.innerHTML = '<span class="gdb-tcol gdb-h">Timer</span><span class="gdb-dcol gdb-h">Dibs</span>';
+    H.p.style.cssText += ";display:flex;align-items:center";
     H.done = true;
   }
   var lastAttach = 0;
@@ -333,7 +366,10 @@
     ".gdb-cell{display:inline-flex;align-items:center;gap:4px;margin-left:6px;vertical-align:middle;font:bold 11px Arial,sans-serif}",
     ".gdb-cell:empty{display:none}",
     ".gdb-cell.gdb-in-status{margin:0 4px 0 0}",
-    ".gdb-cell.gdb-wide{margin:0;gap:6px;font-size:12px}",
+    ".gdb-cell.gdb-wide{margin:0;gap:0;font-size:12px;width:100%;display:flex}",
+    ".gdb-tcol{flex:0 0 55%;display:flex;align-items:center;justify-content:flex-start;padding-left:6px;box-sizing:border-box;white-space:nowrap}",
+    ".gdb-dcol{flex:0 0 45%;display:flex;align-items:center;justify-content:center}",
+    ".gdb-h{font-weight:bold}",
     ".gdb-psec{min-height:0!important;height:auto!important;margin-bottom:8px}",
     ".gdb-pbar{display:flex!important;align-items:center;justify-content:space-between;gap:8px}",
     ".gdb-pcell{margin:0;gap:10px;font-size:13px}",
@@ -344,8 +380,9 @@
     ".gdb-btn.gdb-off{background:#3a3a3a;color:#888;cursor:default}",
     ".gdb-btn.gdb-un{background:#444;color:#eee}",
     ".gdb-btn.gdb-atk{background:#2e7d32;color:#fff}",
-    ".gdb-tm{color:#ff7c7c;font-variant-numeric:tabular-nums}",
-    ".gdb-tm.gdb-open{color:#ffb86b}",
+    ".gdb-tm{color:#ff7c7c;font-variant-numeric:tabular-nums;white-space:nowrap}",
+    ".gdb-tm.gdb-fly{color:#7cc8ff}",
+    ".gdb-tm.gdb-open{font-weight:bold}",
     ".gdb-taken{color:#ff8a8a;white-space:nowrap}.gdb-taken i{color:#aaa;font-style:normal}",
     ".gdb-yours{color:#7cfc7c}",
     "#gdb-prof{position:fixed;left:50%;transform:translateX(-50%);top:70px;z-index:99998;background:#161b26;border:1px solid #2dd4bf;border-radius:8px;padding:8px 10px;display:flex;align-items:center;gap:8px;color:#eee;font:13px Arial,sans-serif;box-shadow:0 4px 14px rgba(0,0,0,.5)}",
