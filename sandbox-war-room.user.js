@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Sandbox War Room 🧪
 // @namespace    jay-torn-war-script-sandbox
-// @version      1.99.57
+// @version      1.99.58
 // @downloadURL  https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @updateURL    https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @description  [SANDBOX - test build, not for general use] Enemy hospital timers, quick attack links, and a chain timeout alert overlay for Torn faction war pages. Works in Tampermonkey (Firefox) and Torn PDA.
@@ -582,7 +582,7 @@ const __twsOuter = (() => {
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.57';
+  const SCRIPT_VERSION = '1.99.58';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -5700,7 +5700,16 @@ const __twsOuter = (() => {
     else if (left > from) btn = `<button class="kwr-prep-call kwr-dib-off" disabled>Call in ${fmtDuration(Math.ceil(left - from))}</button>`;
     else btn = `<button class="kwr-prep-call" data-dib-call="${escHtml(String(id))}">Call</button>`;
     const tm = left == null ? escHtml(t[1] || '') : (t[1] === 'Traveling' ? '\u2708 ' : 'Hosp ') + fmtDuration(Math.max(0, Math.ceil(left)));
-    return `<div class="kwr-prep-card"><div class="kwr-prep-l" data-dib-prep-close="1"><b>${escHtml(t[0])}</b><span>${tm}</span></div>${btn}</div>`;
+    // estimated stats and fair fight, as on the roster (FF colours)
+    let stats = '';
+    try {
+      const m = enemyMembers.find((x) => String(x.id) === String(id));
+      if (m && m.ff) {
+        const ffv = fairFightOf(m.ff), col = ffColour(ffv);
+        stats = `<i class="kwr-prep-st"${col ? ` style="color:${col}"` : ''}>${estHtml(m.ff)}${ffv !== null ? ` \u00b7 FF ${ffv.toFixed(2)}` : ''}</i>`;
+      }
+    } catch (e) { /* no stats */ }
+    return `<div class="kwr-prep-card"><div class="kwr-prep-l" data-dib-prep-close="1"><b>${escHtml(t[0])}</b><span>${tm}</span>${stats}</div>${btn}</div>`;
   }
   function dibPrepRender(on) {
     let box = document.getElementById('kwr-dib-prepbox');
@@ -9461,6 +9470,7 @@ const __twsOuter = (() => {
     .kwr-prep-l { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 8px; cursor: pointer; }
     .kwr-prep-l b { font: bold 24px Arial, sans-serif; color: #fff; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .kwr-prep-l span { font: bold 18px Arial, sans-serif; color: #ff7c7c; background: rgba(239,68,68,.15); border-radius: 8px; padding: 6px 12px; }
+    .kwr-prep-l .kwr-prep-st { font: bold 16px Arial, sans-serif; font-style: normal; color: #9fd3ff; }
     .kwr-prep-call { min-width: 140px; min-height: 96px; border: none; border-radius: 12px; font: bold 24px Arial, sans-serif; background: #2dd4bf; color: #04201c; cursor: pointer; touch-action: manipulation; -webkit-user-select: none; user-select: none; }
     .kwr-prep-call.kwr-dib-off { background: #333; color: #888; cursor: default; font-size: 18px; }
     .kwr-dib-taken { font-size: 10px; color: #ff8a8a; white-space: nowrap; }
