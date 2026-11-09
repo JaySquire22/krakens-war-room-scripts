@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Glory Dibs ✋
 // @namespace    jay-glory-dibs
-// @version      0.2.0
+// @version      0.2.1
 // @description  Call buttons for Glory Command Dibs on the war page, enemy faction pages and enemy profiles. By -TheKraken- [3616083].
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/factions.php*
@@ -81,12 +81,22 @@
   }
 
   // ---- the button for one enemy ----
+  // destination flag from Torn's status text; flying home gets War Room's black "T" badge
+  var FLAGS = [[/mexic/i, "\ud83c\uddf2\ud83c\uddfd"], [/cayman/i, "\ud83c\uddf0\ud83c\uddfe"], [/canad/i, "\ud83c\udde8\ud83c\udde6"], [/hawai/i, "\ud83c\uddfa\ud83c\uddf8"], [/united kingdom|british|\bUK\b|england|english/i, "\ud83c\uddec\ud83c\udde7"],
+    [/argentin/i, "\ud83c\udde6\ud83c\uddf7"], [/switzerland|swiss/i, "\ud83c\udde8\ud83c\udded"], [/japan/i, "\ud83c\uddef\ud83c\uddf5"], [/china|chinese/i, "\ud83c\udde8\ud83c\uddf3"], [/\bUAE\b|emirat|dubai/i, "\ud83c\udde6\ud83c\uddea"], [/south africa/i, "\ud83c\uddff\ud83c\udde6"]];
+  function flagOf(desc) {
+    desc = String(desc || "");
+    if (/to Torn\b/i.test(desc)) return '<span class="gdb-tflag">T</span>';
+    for (var i = 0; i < FLAGS.length; i++) if (FLAGS[i][0].test(desc)) return FLAGS[i][1];
+    return "";
+  }
   function parts(id) {
     var st = S.st, t = st.targets && st.targets[String(id)];
     if (!t) return null;
     var d = (st.dibs || []).filter(function (x) { return x.t === Number(id); })[0];
     var left = timer(t, nowS()), fly = t[1] === "Traveling", from = st.callFrom || CALL_FROM;
-    var tm = left == null ? "" : fly && left <= 0 ? "\u2708 landing" : (fly ? "\u2708 " : "") + dur(left);
+    var fg = fly ? flagOf(t[5]) : "";
+    var tm = left == null ? "" : fly && left <= 0 ? "\u2708 " + (fg ? fg + " " : "") + "landing" : (fly ? "\u2708 " + (fg ? fg + " " : "") : "") + dur(left);
     var cls = "gdb-tm" + (fly ? " gdb-fly" : "") + (left != null && left <= from && left > LATE ? " gdb-open" : "");
     var act;
     if (d && d.by === ME.pid) act = '<span class="gdb-yours">\u2705 Yours</span>';
@@ -382,6 +392,7 @@
     ".gdb-btn.gdb-atk{background:#2e7d32;color:#fff}",
     ".gdb-tm{color:#ff7c7c;font-variant-numeric:tabular-nums;white-space:nowrap}",
     ".gdb-tm.gdb-fly{color:#7cc8ff}",
+    ".gdb-tflag{display:inline-block;background:#000;color:#888;font-weight:bold;font-size:9px;padding:0 3px;border-radius:2px;line-height:1.4;vertical-align:1px}",
     ".gdb-tm.gdb-open{font-weight:bold}",
     ".gdb-taken{color:#ff8a8a;white-space:nowrap}.gdb-taken i{color:#aaa;font-style:normal}",
     ".gdb-yours{color:#7cfc7c}",
