@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Glory Dibs ✋
 // @namespace    jay-glory-dibs
-// @version      0.1.7
+// @version      0.1.8
 // @description  Call buttons for Glory Command Dibs on the war page, enemy faction pages and enemy profiles. By -TheKraken- [3616083].
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/factions.php*
@@ -127,12 +127,7 @@
     var pc = cell(p), dc = cell(d);
     // remember where the columns sit before anything is hidden
     HDR = { p: pc, d: dc, label: p, px: box(pc).left, dx: box(dc).left, w: box(pc).width + box(dc).width, bw: 0, mw: 0 };
-    // the faction badge (the faction's tag picture next to each name): its width moves to the Dibs column
-    var badge = root.querySelector('a[href*="factions.php?step=profile"] img, [class*="faction"] img');
-    if (badge) {
-      var ba = badge.closest("a") || badge;
-      HDR.bw = Math.round(box(ba).width + 4);
-    }
+
     if (!(HDR.w > 0) || HDR.dx <= HDR.px) { HDR = null; hdrMiss = Date.now(); return null; }
     return HDR;
   }
@@ -150,12 +145,6 @@
       if (!dc || dc === pc) return null;
       var w = H.w + H.bw;
       dc.style.display = "none";
-      if (H.bw) {
-        // hide the faction badge in this row and narrow the member cell by the same amount
-        var bl = row.querySelector('a[href*="factions.php?step=profile"]');
-        var memc = row.children[0];
-        if (bl && bl.querySelector("img")) { var bwid = box(bl).width; bl.style.display = "none"; if (memc && memc.contains(bl)) { var mw = box(memc).width; if (mw > 0) memc.style.cssText += ";width:" + (mw - H.bw) + "px;max-width:" + (mw - H.bw) + "px;flex:0 0 " + (mw - H.bw) + "px"; } }
-      }
       pc.setAttribute("data-gdb", "1"); row.setAttribute("data-gdb-pc", "1"); pc.innerHTML = "";
       pc.style.cssText += ";width:" + w + "px;max-width:" + w + "px;flex:0 0 " + w + "px;display:flex;align-items:center;justify-content:center;overflow:visible";
     }
@@ -164,10 +153,6 @@
   function wideHeader(H) {
     if (H.done) return;
     var w = H.w + H.bw;
-    if (H.bw) {
-      var mh = H.p.parentElement && H.p.parentElement.children[0];
-      if (mh && mh !== H.p) { var mhw = box(mh).width; if (mhw > 0) mh.style.cssText += ";width:" + (mhw - H.bw) + "px;max-width:" + (mhw - H.bw) + "px;flex:0 0 " + (mhw - H.bw) + "px"; }
-    }
     H.label.textContent = "Dibs"; H.d.style.display = "none";
     H.p.style.cssText += ";width:" + w + "px;max-width:" + w + "px;flex:0 0 " + w + "px";
     H.done = true;
