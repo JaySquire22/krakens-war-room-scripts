@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dibs Caller ✋
 // @namespace    jay-glory-dibs
-// @version      0.3.5
+// @version      0.3.6
 // @description  Call buttons for Glory Command Dibs on the war page, enemy faction pages and enemy profiles. By -TheKraken- [3616083].
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/factions.php*
@@ -24,6 +24,7 @@
   if (window.top !== window.self) return;
   if (window.__gdbLoaded) return; window.__gdbLoaded = true;
   var API = "https://dashing-fish-54.eu-west-1.convex.site/chain/api";
+  var VER = "0.3.6";
   var CALL_FROM = 359, LATE = 15;
 
   // ---- storage (Tampermonkey / Violentmonkey / Torn PDA) ----
@@ -407,7 +408,7 @@
       if (!an) return null;
       if (!b) {
         b = document.createElement("div"); b.id = "gdb-bar"; b.className = "gdb-host";
-        b.innerHTML = '<div class="gdb-bh" data-gdb-tog="1"><span class="gdb-bt">\u270b Dibs Caller</span><span class="gdb-bst"></span><span class="gdb-chev"></span></div><div class="gdb-body"><div class="gdb-bc"></div><div class="gdb-bb"></div></div>';
+        b.innerHTML = '<div class="gdb-bh" data-gdb-tog="1"><span class="gdb-bt">\u270b Dibs Caller <small class="gdb-ver">v' + VER + '</small></span><span class="gdb-bst"></span><span class="gdb-chev"></span></div><div class="gdb-body"><div class="gdb-bc"></div><div class="gdb-bb"></div></div>';
       }
       an.parentNode.insertBefore(b, an.nextSibling);
     }
@@ -427,7 +428,7 @@
     var title = act; while (title.parentElement !== wrap) title = title.parentElement;
     sec = wrap.cloneNode(false); sec.className += " gdb-psec gdb-host"; sec.removeAttribute("id");
     var t2 = title.cloneNode(false); t2.removeAttribute("id"); t2.className += " gdb-pbar"; t2.setAttribute("data-gdb-tog", "1");
-    t2.innerHTML = '<span class="gdb-pt">\u270b Dibs Caller</span><span class="gdb-bst"></span><span class="gdb-cell gdb-pcell" data-gdb-id="' + pm[1] + '"></span><span class="gdb-chev"></span>';
+    t2.innerHTML = '<span class="gdb-pt">\u270b Dibs Caller <small class="gdb-ver">v' + VER + '</small></span><span class="gdb-bst"></span><span class="gdb-cell gdb-pcell" data-gdb-id="' + pm[1] + '"></span><span class="gdb-chev"></span>';
     var src = null; for (var i = 0; i < wrap.children.length; i++) if (wrap.children[i] !== title) { src = wrap.children[i]; break; }
     var body = src ? src.cloneNode(false) : document.createElement("div"); body.removeAttribute("id");
     body.className += " gdb-body gdb-pbody"; body.innerHTML = '<div class="gdb-bc"></div><div class="gdb-bb"></div>';
@@ -463,7 +464,7 @@
     var p = document.getElementById("gdb-panel");
     if (p) { p.remove(); return; }
     p = document.createElement("div"); p.id = "gdb-panel";
-    p.innerHTML = '<b>\u270b Dibs Caller</b> <span class="gdb-x" data-gdb-close="1">\u2715</span>' + bodyHtml();
+    p.innerHTML = '<b>\u270b Dibs Caller</b> <small class="gdb-ver">v' + VER + '</small> <span class="gdb-x" data-gdb-close="1">\u2715</span>' + bodyHtml();
     document.body.appendChild(p);
   }
   function refresh() { var p = document.getElementById("gdb-panel"); if (p) p.remove(); var b = document.querySelector(".gdb-host .gdb-bb"); if (b) b.__h = ""; ui(); tick(); }
@@ -554,19 +555,36 @@
   document.addEventListener("change", function (e) { if (e.target.tagName === "SELECT" || e.target.type === "radio") otherSort(e.target); }, true);
   document.addEventListener("click", function (e) { otherSort(e.target); }, true);
   // Timer header: sort. Kept from Torn, so Torn's own column sorting doesn't run.
-  function sortHit(t) {
-    if (!t || !t.closest) return false;
-    if (t.closest("[data-gdb-sort]")) return true;
-    // a tap that lands on the Timer/Dibs heading cell itself (not the Dibs word) counts too
-    var cell = t.closest('[data-gdb-hdr="1"]');
-    return !!(cell && !t.closest(".gdb-dcol"));
+  function inBox(el, x, y) { var b = el.getBoundingClientRect(); return b.width > 0 && b.height > 0 && x >= b.left && x <= b.right && y >= b.top && y <= b.bottom; }
+  function sortHit(t, e) {
+    if (t && t.closest) {
+      if (t.closest("[data-gdb-sort]")) return true;
+      // a tap that lands on the Timer/Dibs heading cell itself (not the Dibs word) counts too
+      var cell = t.closest('[data-gdb-hdr="1"]');
+      if (cell && !t.closest(".gdb-dcol")) return true;
+    }
+    // by screen position, in case something invisible is lying over the heading and takes the tap
+    if (e && e.clientX != null && (e.clientX || e.clientY)) {
+      var lb = document.querySelectorAll(".gdb-sort");
+      for (var i = 0; i < lb.length; i++) {
+        var c = lb[i].parentElement;
+        if (c && inBox(c, e.clientX, e.clientY)) {
+          var dc = c.querySelector(".gdb-dcol");
+          if (!(dc && inBox(dc, e.clientX, e.clientY))) return true;
+        }
+      }
+    }
+    return false;
   }
   var sortTap = 0, sortDown = null;
-  document.addEventListener("pointerdown", function (e) { sortDown = sortHit(e.target) ? { x: e.clientX, y: e.clientY, t: Date.now() } : null; }, true);
+  function downAt(e) { var p = e.touches && e.touches[0] || e; sortDown = sortHit(e.target, p) ? { x: p.clientX, y: p.clientY, t: Date.now() } : null; }
+  window.addEventListener("pointerdown", downAt, true);
+  window.addEventListener("touchstart", downAt, { capture: true, passive: true });
   function sortToggle(e) {
-    if (!sortHit(e.target)) return;
+    var p = e.changedTouches && e.changedTouches[0] || e;
+    if (!sortHit(e.target, p)) return;
     // pointerup only counts as a tap (not the end of a scroll that started elsewhere)
-    if (e.type === "pointerup" && !(sortDown && Date.now() - sortDown.t < 800 && Math.abs(e.clientX - sortDown.x) < 12 && Math.abs(e.clientY - sortDown.y) < 12)) return;
+    if (e.type !== "click" && !(sortDown && Date.now() - sortDown.t < 800 && Math.abs(p.clientX - sortDown.x) < 12 && Math.abs(p.clientY - sortDown.y) < 12)) return;
     e.preventDefault(); e.stopPropagation();
     if (Date.now() - sortTap < 400) return; // one tap fires pointerup and click: count it once
     sortTap = Date.now();
@@ -574,8 +592,10 @@
     sortAt = 0; var n = sortRows();
     toast(m === "asc" ? "\u23f1 Timer sort: soonest first (" + n + " with timers)" : m === "desc" ? "\u23f1 Timer sort: latest first (" + n + " with timers)" : "\u23f1 Timer sort off", "ok");
   }
-  document.addEventListener("pointerup", sortToggle, true);
-  document.addEventListener("click", sortToggle, true);
+  // on window (the very first place a tap arrives), so nothing on the page can stop it reaching us first
+  window.addEventListener("pointerup", sortToggle, true);
+  window.addEventListener("touchend", sortToggle, true);
+  window.addEventListener("click", sortToggle, true);
   document.addEventListener("change", function (e) {
     var o = e.target.closest && e.target.closest("[data-gdb-opt]");
     if (!o) return;
@@ -649,6 +669,7 @@
     ".gdb-host .gdb-bb .gdb-btn{font-size:13px;padding:6px 12px}.gdb-host .gdb-msg,#gdb-panel .gdb-msg{color:#ff8a8a;font-size:12px;margin-top:4px}",
     ".gdb-set{margin:8px 0;padding:6px 0;border-top:1px solid #444;border-bottom:1px solid #444}.gdb-opt{display:flex;align-items:center;gap:6px;margin-top:4px;cursor:pointer}.gdb-opt i{color:#999;font-style:normal}",
     ".gdb-pbody{padding:0!important;min-height:0!important;height:auto!important}",
+    ".gdb-ver{font-weight:normal;font-size:10px;color:#aaa}",
     ".gdb-sort{cursor:pointer;-webkit-user-select:none;user-select:none;pointer-events:auto!important}[data-gdb-hdr]{pointer-events:auto!important}",
     "#gdb-fab{position:fixed;right:10px;bottom:70px;z-index:99999;width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:20px;cursor:pointer;background:#161b26;border:2px solid #555;box-shadow:0 2px 8px rgba(0,0,0,.5)}",
     "#gdb-fab.on{border-color:#2dd4bf}#gdb-fab.idle{border-color:#f59e0b}#gdb-fab.out{border-color:#ef4444}",
