@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dibs Caller ✋
 // @namespace    jay-glory-dibs
-// @version      0.4.2
+// @version      0.4.3
 // @description  Call buttons for Glory Command Dibs on the war page, enemy faction pages and enemy profiles. By -TheKraken- [3616083].
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/factions.php*
@@ -24,7 +24,7 @@
   if (window.top !== window.self) return;
   if (window.__gdbLoaded) return; window.__gdbLoaded = true;
   var API = "https://dashing-fish-54.eu-west-1.convex.site/chain/api";
-  var VER = "0.4.2";
+  var VER = "0.4.3";
   var CALL_FROM = 359, LATE = 15;
 
   // ---- storage (Tampermonkey / Violentmonkey / Torn PDA) ----
@@ -91,6 +91,22 @@
     for (var i = 0; i < FLAGS.length; i++) if (FLAGS[i][0].test(desc)) return FLAGS[i][1];
     return "";
   }
+  // where someone is: "torn", a country (its number in FLAGS), or "air"
+  function placeOf(state, desc) {
+    state = String(state || ""); desc = String(desc || "");
+    if (state === "Traveling") return "air";
+    for (var i = 0; i < FLAGS.length; i++) if (FLAGS[i][0].test(desc) && (state === "Abroad" || /hospital|jail/i.test(desc))) return "c" + i;
+    return state === "Abroad" ? "abroad" : "torn";
+  }
+  // an Attack button for anyone who's out (Okay, or abroad where you are too)
+  function canAttack(t) {
+    if (t[1] !== "Okay" && t[1] !== "Abroad") return false;
+    var me = S.st && S.st.me, mine = me ? placeOf(me[0], me[1]) : "torn"; // not known yet: assume Torn
+    if (mine === "air") return false;
+    var theirs = placeOf(t[1], t[5]);
+    return theirs !== "abroad" && theirs === mine;
+  }
+  function atkBtn(id) { return '<a class="gdb-btn gdb-atk" href="https://www.torn.com/loader.php?sid=attack&user2ID=' + id + '">Attack</a>'; }
   function parts(id) {
     var st = S.st, t = st.targets && st.targets[String(id)];
     if (!t) return null;
@@ -100,10 +116,10 @@
     // flights: flag, time, then the plane last (if space runs out, the plane is what gets cut); hospital: \ud83c\udfe5 first
     var tm = left == null || get("timers") === "0" ? "" : fly ? (fg ? fg + " " : "") + (left <= 0 ? "landing" : dur(left)) + " \u2708" : "\ud83c\udfe5 " + dur(left);
     var cls = "gdb-tm" + (fly ? " gdb-fly" : "") + (left != null && left <= from && left > LATE ? " gdb-open" : "");
-    var act;
-    if (d && d.by === ME.pid) act = '<span class="gdb-yours">\u2705 Yours</span>';
+    var act, atk = canAttack(t);
+    if (d && d.by === ME.pid) act = atk ? atkBtn(id) : '<span class="gdb-yours">\u2705 Yours</span>';
     else if (d) act = '<span class="gdb-taken">\u270b ' + esc(d.byName) + (d.myMs ? ' <i>+' + ((d.myMs - d.ms) / 1000).toFixed(2) + "s</i>" : "") + "</span>";
-    else if (left == null) act = "";
+    else if (left == null) act = atk ? atkBtn(id) : "";
     else if (left <= LATE) act = '<button class="gdb-btn gdb-off" disabled>Late</button>';
     else if (left > from) act = '<button class="gdb-btn gdb-off" disabled>Call</button>';
     else act = '<button class="gdb-btn" data-gdb-call="' + id + '">Call</button>';
