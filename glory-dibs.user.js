@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dibs Caller ✋
 // @namespace    jay-glory-dibs
-// @version      0.3.9
+// @version      0.4.0
 // @description  Call buttons for Glory Command Dibs on the war page, enemy faction pages and enemy profiles. By -TheKraken- [3616083].
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/factions.php*
@@ -24,7 +24,7 @@
   if (window.top !== window.self) return;
   if (window.__gdbLoaded) return; window.__gdbLoaded = true;
   var API = "https://dashing-fish-54.eu-west-1.convex.site/chain/api";
-  var VER = "0.3.9";
+  var VER = "0.4.0";
   var CALL_FROM = 359, LATE = 15;
 
   // ---- storage (Tampermonkey / Violentmonkey / Torn PDA) ----
@@ -565,18 +565,14 @@
     if (t && t.closest) {
       if (t.closest("[data-gdb-sort]")) return true;
       // a tap that lands on the Timer/Dibs heading cell itself (not the Dibs word) counts too
-      var cell = t.closest('[data-gdb-hdr="1"]');
-      if (cell && !t.closest(".gdb-dcol")) return true;
+      if (t.closest('[data-gdb-hdr="1"]')) return true;
     }
     // by screen position, in case something invisible is lying over the heading and takes the tap
     if (e && e.clientX != null && (e.clientX || e.clientY)) {
       var lb = document.querySelectorAll(".gdb-sort");
       for (var i = 0; i < lb.length; i++) {
         var c = lb[i].parentElement;
-        if (c && inBox(c, e.clientX, e.clientY)) {
-          var dc = c.querySelector(".gdb-dcol");
-          if (!(dc && inBox(dc, e.clientX, e.clientY))) return true;
-        }
+        if (c && inBox(c, e.clientX, e.clientY)) return true;
       }
     }
     return false;
@@ -720,6 +716,7 @@
     "#gdb-toast.warn{white-space:pre-wrap;font-size:11px}",
     ".gdb-sortset{margin:8px 0}.gdb-sortset .gdb-btn{margin:3px 4px 0 0}",
     ".gdb-ver{font-weight:normal;font-size:10px;color:#aaa}",
+    "[data-gdb-hdr] .gdb-tcol{width:auto!important;flex:1 1 auto!important;min-width:0}[data-gdb-hdr] .gdb-dcol{width:auto!important;flex:0 0 auto!important;pointer-events:none}[data-gdb-hdr]{cursor:pointer}",
     ".gdb-sort{cursor:pointer;-webkit-user-select:none;user-select:none;pointer-events:auto!important}[data-gdb-hdr]{pointer-events:auto!important}",
     "#gdb-fab{position:fixed;right:10px;bottom:70px;z-index:99999;width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:20px;cursor:pointer;background:#161b26;border:2px solid #555;box-shadow:0 2px 8px rgba(0,0,0,.5)}",
     "#gdb-fab.on{border-color:#2dd4bf}#gdb-fab.idle{border-color:#f59e0b}#gdb-fab.out{border-color:#ef4444}",
