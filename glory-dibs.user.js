@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dibs Caller ✋
 // @namespace    jay-glory-dibs
-// @version      0.3.6
+// @version      0.3.7
 // @description  Call buttons for Glory Command Dibs on the war page, enemy faction pages and enemy profiles. By -TheKraken- [3616083].
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/factions.php*
@@ -24,7 +24,7 @@
   if (window.top !== window.self) return;
   if (window.__gdbLoaded) return; window.__gdbLoaded = true;
   var API = "https://dashing-fish-54.eu-west-1.convex.site/chain/api";
-  var VER = "0.3.6";
+  var VER = "0.3.7";
   var CALL_FROM = 359, LATE = 15;
 
   // ---- storage (Tampermonkey / Violentmonkey / Torn PDA) ----
@@ -577,12 +577,23 @@
     return false;
   }
   var sortTap = 0, sortDown = null;
-  function downAt(e) { var p = e.touches && e.touches[0] || e; sortDown = sortHit(e.target, p) ? { x: p.clientX, y: p.clientY, t: Date.now() } : null; }
+  // Torn sorts its columns the moment a finger touches the heading (and redraws it), so every part of a
+  // tap on our Timer heading is kept from the page: touch-down, mouse-down, lift and click.
+  function downAt(e) {
+    var p = e.touches && e.touches[0] || e;
+    if (sortHit(e.target, p)) {
+      e.stopPropagation(); e.stopImmediatePropagation();
+      if (e.type === "pointerdown" || e.type === "touchstart") sortDown = { x: p.clientX, y: p.clientY, t: Date.now() };
+    } else if (e.type === "pointerdown" || e.type === "touchstart") sortDown = null;
+  }
   window.addEventListener("pointerdown", downAt, true);
+  window.addEventListener("mousedown", downAt, true);
   window.addEventListener("touchstart", downAt, { capture: true, passive: true });
+  window.addEventListener("mouseup", function (e) { if (sortHit(e.target, e)) { e.stopPropagation(); e.stopImmediatePropagation(); } }, true);
   function sortToggle(e) {
     var p = e.changedTouches && e.changedTouches[0] || e;
     if (!sortHit(e.target, p)) return;
+    e.stopImmediatePropagation();
     // pointerup only counts as a tap (not the end of a scroll that started elsewhere)
     if (e.type !== "click" && !(sortDown && Date.now() - sortDown.t < 800 && Math.abs(p.clientX - sortDown.x) < 12 && Math.abs(p.clientY - sortDown.y) < 12)) return;
     e.preventDefault(); e.stopPropagation();
