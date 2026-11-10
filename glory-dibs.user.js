@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dibs Caller ✋
 // @namespace    jay-glory-dibs
-// @version      0.3.4
+// @version      0.3.5
 // @description  Call buttons for Glory Command Dibs on the war page, enemy faction pages and enemy profiles. By -TheKraken- [3616083].
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/factions.php*
@@ -242,6 +242,7 @@
     H.d.style.display = "none";
     setW(H.p, w);
     H.p.innerHTML = '<span class="gdb-tcol gdb-h gdb-sort" data-gdb-sort="1"></span><span class="gdb-dcol gdb-h">Dibs</span>';
+    H.p.setAttribute("data-gdb-hdr", "1");
     H.p.style.cssText += ";display:flex;align-items:center";
     H.done = true;
   }
@@ -484,32 +485,44 @@
     for (var i = 0; i < n; i++) r.push('.gdb-sorted>[data-gdb-rank="' + i + '"]{order:' + i + "!important}");
     rankCss.textContent = r.join("\n"); rankCss.__n = n;
   }
+  // every copy of the member list (another script can show its own copy of Torn's list and header)
+  function sortLists() {
+    var seen = [], rows = document.querySelectorAll('[data-gdb-pc="1"]');
+    for (var i = 0; i < rows.length; i++) { var l = rows[i].parentElement; if (l && seen.indexOf(l) < 0) seen.push(l); }
+    return seen;
+  }
+  function sortLabel() {
+    var mode = get("sort") || "";
+    var txt = (get("timers") === "0" ? "Sort" : "Timer") + " " + (mode === "asc" ? "\u25b2" : mode === "desc" ? "\u25bc" : "\u21c5");
+    var lbs = document.querySelectorAll(".gdb-sort");
+    for (var i = 0; i < lbs.length; i++) if (lbs[i].textContent !== txt) lbs[i].textContent = txt;
+  }
   function sortRows() {
     var mode = get("sort") || "";
-    if (HDR && HDR.p.isConnected) {
-      var lb = HDR.p.querySelector(".gdb-sort");
-      var txt = (get("timers") === "0" ? "Sort" : "Timer") + " " + (mode === "asc" ? "\u25b2" : mode === "desc" ? "\u25bc" : "\u21c5");
-      if (lb && lb.textContent !== txt) lb.textContent = txt;
-    }
-    if (!active() || Date.now() - sortAt < 500) return;
+    sortLabel();
+    if (!active() || Date.now() - sortAt < 500) return 0;
     sortAt = Date.now();
-    var one = document.querySelector('[data-gdb-pc="1"]'), list = one && one.parentElement;
-    if (!list) return;
-    var rows = Array.prototype.slice.call(list.children);
-    if (!mode) {
-      if (list.classList.contains("gdb-sorted")) { list.classList.remove("gdb-sorted"); rows.forEach(function (r) { r.removeAttribute("data-gdb-rank"); }); }
-      return;
-    }
-    // ties and rows without a timer keep the page's current order (whatever another script left)
-    var k = rows.map(function (r, i) { return { r: r, i: i, v: sortKey(r) }; });
-    k.sort(function (x, y) {
-      if (x.v == null && y.v == null) return x.i - y.i;
-      if (x.v == null) return 1; if (y.v == null) return -1; // no timer: at the bottom
-      return (mode === "asc" ? x.v - y.v : y.v - x.v) || x.i - y.i;
+    var lists = sortLists(), done = 0;
+    lists.forEach(function (list) {
+      var rows = Array.prototype.slice.call(list.children);
+      if (!mode) {
+        if (list.classList.contains("gdb-sorted")) { list.classList.remove("gdb-sorted"); rows.forEach(function (r) { r.removeAttribute("data-gdb-rank"); }); }
+        return;
+      }
+      // ties and rows without a timer keep the page's current order (whatever another script left)
+      var k = rows.map(function (r, i) { return { r: r, i: i, v: sortKey(r) }; });
+      k.sort(function (x, y) {
+        if (x.v == null && y.v == null) return x.i - y.i;
+        if (x.v == null) return 1; if (y.v == null) return -1; // no timer: at the bottom
+        return (mode === "asc" ? x.v - y.v : y.v - x.v) || x.i - y.i;
+      });
+      rankSheet(Math.max(100, k.length + 20));
+      var c = 0;
+      k.forEach(function (x, n) { if (x.r.getAttribute("data-gdb-rank") !== String(n)) x.r.setAttribute("data-gdb-rank", String(n)); if (x.v != null) c++; });
+      done = Math.max(done, c);
+      if (!list.classList.contains("gdb-sorted")) list.classList.add("gdb-sorted");
     });
-    rankSheet(Math.max(100, k.length + 20));
-    k.forEach(function (x, n) { if (x.r.getAttribute("data-gdb-rank") !== String(n)) x.r.setAttribute("data-gdb-rank", String(n)); });
-    if (!list.classList.contains("gdb-sorted")) list.classList.add("gdb-sorted");
+    return done;
   }
 
   // Whichever sort was picked last wins: picking a sort in FFScouter's controls or on another column
@@ -528,7 +541,9 @@
   function otherSort(t) {
     if (!get("sort") || !t.closest || t.closest("[data-gdb-sort], .gdb-host, #gdb-panel")) return;
     // another column header of the member list
-    if (HDR && HDR.p.isConnected && HDR.p.parentElement && HDR.p.parentElement.contains(t) && !HDR.p.contains(t) && !t.closest('[class*="search" i], input')) { off(); return; }
+    var hr = null;
+    for (var e = t, i = 0; e && i < 6; e = e.parentElement, i++) if (e.querySelector && e.querySelector(':scope > [data-gdb-hdr="1"]')) { hr = e; break; }
+    if (hr && !t.closest('[data-gdb-hdr="1"], [class*="search" i], input')) { off(); return; }
     var box = ffsBox(t);
     if (!box) return;
     var c = t.closest("button, a, select, option, input, label, [role=button], li, span") || t;
@@ -539,12 +554,28 @@
   document.addEventListener("change", function (e) { if (e.target.tagName === "SELECT" || e.target.type === "radio") otherSort(e.target); }, true);
   document.addEventListener("click", function (e) { otherSort(e.target); }, true);
   // Timer header: sort. Kept from Torn, so Torn's own column sorting doesn't run.
-  document.addEventListener("click", function (e) {
-    var t = e.target;
-    if (!t.closest || !t.closest("[data-gdb-sort]")) return;
+  function sortHit(t) {
+    if (!t || !t.closest) return false;
+    if (t.closest("[data-gdb-sort]")) return true;
+    // a tap that lands on the Timer/Dibs heading cell itself (not the Dibs word) counts too
+    var cell = t.closest('[data-gdb-hdr="1"]');
+    return !!(cell && !t.closest(".gdb-dcol"));
+  }
+  var sortTap = 0, sortDown = null;
+  document.addEventListener("pointerdown", function (e) { sortDown = sortHit(e.target) ? { x: e.clientX, y: e.clientY, t: Date.now() } : null; }, true);
+  function sortToggle(e) {
+    if (!sortHit(e.target)) return;
+    // pointerup only counts as a tap (not the end of a scroll that started elsewhere)
+    if (e.type === "pointerup" && !(sortDown && Date.now() - sortDown.t < 800 && Math.abs(e.clientX - sortDown.x) < 12 && Math.abs(e.clientY - sortDown.y) < 12)) return;
     e.preventDefault(); e.stopPropagation();
-    var m = get("sort") || ""; set("sort", m === "" ? "asc" : m === "asc" ? "desc" : ""); sortAt = 0; sortRows();
-  }, true);
+    if (Date.now() - sortTap < 400) return; // one tap fires pointerup and click: count it once
+    sortTap = Date.now();
+    var m = get("sort") || ""; m = m === "" ? "asc" : m === "asc" ? "desc" : ""; set("sort", m);
+    sortAt = 0; var n = sortRows();
+    toast(m === "asc" ? "\u23f1 Timer sort: soonest first (" + n + " with timers)" : m === "desc" ? "\u23f1 Timer sort: latest first (" + n + " with timers)" : "\u23f1 Timer sort off", "ok");
+  }
+  document.addEventListener("pointerup", sortToggle, true);
+  document.addEventListener("click", sortToggle, true);
   document.addEventListener("change", function (e) {
     var o = e.target.closest && e.target.closest("[data-gdb-opt]");
     if (!o) return;
@@ -618,7 +649,7 @@
     ".gdb-host .gdb-bb .gdb-btn{font-size:13px;padding:6px 12px}.gdb-host .gdb-msg,#gdb-panel .gdb-msg{color:#ff8a8a;font-size:12px;margin-top:4px}",
     ".gdb-set{margin:8px 0;padding:6px 0;border-top:1px solid #444;border-bottom:1px solid #444}.gdb-opt{display:flex;align-items:center;gap:6px;margin-top:4px;cursor:pointer}.gdb-opt i{color:#999;font-style:normal}",
     ".gdb-pbody{padding:0!important;min-height:0!important;height:auto!important}",
-    ".gdb-sort{cursor:pointer;-webkit-user-select:none;user-select:none}",
+    ".gdb-sort{cursor:pointer;-webkit-user-select:none;user-select:none;pointer-events:auto!important}[data-gdb-hdr]{pointer-events:auto!important}",
     "#gdb-fab{position:fixed;right:10px;bottom:70px;z-index:99999;width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:20px;cursor:pointer;background:#161b26;border:2px solid #555;box-shadow:0 2px 8px rgba(0,0,0,.5)}",
     "#gdb-fab.on{border-color:#2dd4bf}#gdb-fab.idle{border-color:#f59e0b}#gdb-fab.out{border-color:#ef4444}",
     "#gdb-panel{position:fixed;right:10px;bottom:115px;z-index:99999;width:270px;background:#161b26;color:#eee;border:1px solid #333;border-radius:10px;padding:10px;font:13px Arial,sans-serif;box-shadow:0 6px 20px rgba(0,0,0,.6)}",
