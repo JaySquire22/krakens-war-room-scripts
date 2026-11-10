@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dibs Caller ✋
 // @namespace    jay-glory-dibs
-// @version      0.4.1
+// @version      0.4.2
 // @description  Call buttons for Glory Command Dibs on the war page, enemy faction pages and enemy profiles. By -TheKraken- [3616083].
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/factions.php*
@@ -24,7 +24,7 @@
   if (window.top !== window.self) return;
   if (window.__gdbLoaded) return; window.__gdbLoaded = true;
   var API = "https://dashing-fish-54.eu-west-1.convex.site/chain/api";
-  var VER = "0.4.1";
+  var VER = "0.4.2";
   var CALL_FROM = 359, LATE = 15;
 
   // ---- storage (Tampermonkey / Violentmonkey / Torn PDA) ----
@@ -362,9 +362,12 @@
 
   // ---- Dibs Caller bar: fixed under Faction Description (faction pages) or the Dibs section above Actions
   // (profiles). Both can be minimised; settings and sign-in live inside. Elsewhere: a small round button. ----
+  // seconds since the server last got the enemy's statuses from Torn (null when unknown)
+  function dataAge() { var st = S.st; return st && st.on && st.snapAt ? Math.max(0, Math.round(nowS() - st.snapAt)) : null; }
   function statusTxt() {
     if (!ME) return "Not signed in";
-    var st = S.st;
+    var st = S.st, age = dataAge();
+    if (st && st.on && age != null && age > 45) return "\u26a0 Timers " + (age >= 120 ? Math.floor(age / 60) + "m" : age + "s") + " old";
     if (st) return st.on ? "ON vs " + esc(st.enemyName || ("#" + st.enemyF)) : "Switched off";
     return S.err ? "Not available" : "Checking\u2026";
   }
@@ -373,6 +376,7 @@
     return (ME
       ? '<div>Signed in as <b>' + esc(ME.name) + '</b> [' + ME.pid + ']</div><div class="gdb-s">'
         + (st ? (st.on ? "Dibs is ON against <b>" + esc(st.enemyName || ("#" + st.enemyF)) + "</b>." : "Dibs is switched off.") : (S.err ? "Not available: " + esc(S.err) : "Checking\u2026"))
+        + (st && st.on && dataAge() != null && dataAge() > 45 ? '<br><b class="gdb-stale">\u26a0 The server hasn\'t had fresh statuses from Torn for ' + (dataAge() >= 120 ? Math.floor(dataAge() / 60) + " minutes" : dataAge() + " seconds") + ", so timers may be out of date." + (st.err ? " (" + esc(st.err) + ")" : "") + "</b>" : "")
         + '</div>'
       : '<div class="gdb-s">Sign in with your Torn API key (Public is enough). It is checked once by the Glory Command server and not stored.</div>'
         + '<input class="gdb-key" maxlength="16" placeholder="API key" autocomplete="off"><button class="gdb-btn" data-gdb-in="1">Sign in</button><div class="gdb-msg"></div>')
@@ -678,6 +682,7 @@
     ".gdb-host .gdb-bb .gdb-btn{font-size:13px;padding:6px 12px}.gdb-host .gdb-msg,#gdb-panel .gdb-msg{color:#ff8a8a;font-size:12px;margin-top:4px}",
     ".gdb-set{margin:8px 0;padding:6px 0;border-top:1px solid #444;border-bottom:1px solid #444}.gdb-opt{display:flex;align-items:center;gap:6px;margin-top:4px;cursor:pointer}.gdb-opt i{color:#999;font-style:normal}",
     ".gdb-pbody{padding:0!important;min-height:0!important;height:auto!important}",
+    ".gdb-stale{color:#fbbf24;font-weight:normal}",
     ".gdb-ver{font-weight:normal;font-size:10px;color:#aaa}",
     "[data-gdb-hdr] .gdb-tcol{width:auto!important;flex:1 1 auto!important;min-width:0}[data-gdb-hdr] .gdb-dcol{width:auto!important;flex:0 0 auto!important;pointer-events:none}[data-gdb-hdr]{cursor:pointer}",
     ".gdb-sort{cursor:pointer;-webkit-user-select:none;user-select:none;pointer-events:auto!important}[data-gdb-hdr]{pointer-events:auto!important}",
