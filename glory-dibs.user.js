@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dibs Caller ✋
 // @namespace    jay-glory-dibs
-// @version      0.3.2
+// @version      0.3.3
 // @description  Call buttons for Glory Command Dibs on the war page, enemy faction pages and enemy profiles. By -TheKraken- [3616083].
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/factions.php*
@@ -304,8 +304,10 @@
     // slow flash while the target's showing Online (kept in step when it's redrawn)
     var onl = t[3] === "on";
     if (onl) h = h.replace("</b><br>", '</b> <span class="gdb-onltag">\ud83d\udfe2 Online</span><br>');
-    el.classList.toggle("gdb-onl", onl); el.style.animationDelay = onl ? (-(Date.now() % 2400)) + "ms" : "";
+    var dl = onl ? (-(Date.now() % 2400)) + "ms" : "";
+    el.classList.toggle("gdb-onl", onl); el.style.animationDelay = dl;
     if (el.__h !== h) { el.__h = h; el.innerHTML = h; }
+    var tag = el.querySelector(".gdb-onltag"); if (tag) tag.style.animationDelay = dl; // in step with the box
   }
 
   function tick() {
@@ -503,6 +505,32 @@
     k.forEach(function (x, n) { if (x.r.style.order !== String(n)) x.r.style.order = String(n); });
   }
 
+  // Whichever sort was picked last wins: picking a sort in FFScouter's controls or on another column
+  // header turns ours off (the rows go back to that order); tapping Timer again puts ours back on.
+  var SORTY = /sort|order|asc|desc|\u2191|\u2193|\u25b2|\u25bc|\u21c5|\u2b06|\u2b07/i;
+  function ffsBox(t) {
+    var b = t.closest('[class*="ffs" i], [id*="ffs" i], [class*="scouter" i], [id*="scouter" i]');
+    if (b) return b;
+    // a box whose text starts with FFScouter's title, and that isn't the member list itself
+    for (var e = t, i = 0; e && e !== document.body && i < 8; e = e.parentElement, i++) {
+      if (e.querySelectorAll('a[href*="profiles.php?XID="]').length > 2) return null;
+      if (/^\W{0,3}FFScouter/i.test((e.textContent || "").trim().slice(0, 40))) return e;
+    }
+    return null;
+  }
+  function otherSort(t) {
+    if (!get("sort") || !t.closest || t.closest("[data-gdb-sort], .gdb-host, #gdb-panel")) return;
+    // another column header of the member list
+    if (HDR && HDR.p.isConnected && HDR.p.parentElement && HDR.p.parentElement.contains(t) && !HDR.p.contains(t) && !t.closest('[class*="search" i], input')) { off(); return; }
+    var box = ffsBox(t);
+    if (!box) return;
+    var c = t.closest("button, a, select, option, input, label, [role=button], li, span") || t;
+    var txt = [c.textContent, c.getAttribute && c.getAttribute("title"), c.getAttribute && c.getAttribute("aria-label"), c.name, c.id, c.className, c.value].join(" ");
+    if (SORTY.test(txt)) off();
+    function off() { set("sort", ""); sortAt = 0; sortRows(); }
+  }
+  document.addEventListener("change", function (e) { if (e.target.tagName === "SELECT" || e.target.type === "radio") otherSort(e.target); }, true);
+  document.addEventListener("click", function (e) { otherSort(e.target); }, true);
   // Timer header: sort. Kept from Torn, so Torn's own column sorting doesn't run.
   document.addEventListener("click", function (e) {
     var t = e.target;
@@ -568,7 +596,8 @@
     "#gdb-called.gdb-inbar{position:static;left:auto;right:auto;bottom:auto;z-index:auto;margin:0;border-radius:0;border-width:1px 0 0;box-shadow:none}",
     "#gdb-called.gdb-onl{animation:gdbOnl 2.4s ease-in-out infinite}",
     "@keyframes gdbOnl{0%,100%{border-color:#22c55e;background:#0f2a1c}50%{border-color:#ef4444;background:#3d1414}}",
-    ".gdb-onltag{font-size:10px;font-weight:bold;color:#fca5a5}",
+    ".gdb-onltag{font-size:11px;font-weight:bold;color:#fff;animation:gdbOnlTag 2.4s ease-in-out infinite}",
+    "@keyframes gdbOnlTag{0%,100%{opacity:.45;text-shadow:none}50%{opacity:1;text-shadow:0 0 6px #fff,0 0 2px #fff}}",
     "#gdb-bar{margin:10px 0;border-radius:5px;overflow:hidden;background:#2e2e2e;color:#ddd;font:12px Arial,sans-serif;box-shadow:0 1px 3px rgba(0,0,0,.4)}",
     "#gdb-bar .gdb-bh{display:flex;align-items:center;gap:8px;padding:0 12px;height:34px;cursor:pointer;background:linear-gradient(#555,#333);color:#fff;font:bold 13px Arial,sans-serif;-webkit-user-select:none;user-select:none}",
     ".gdb-host .gdb-bt,.gdb-host .gdb-pt{flex:none}.gdb-host .gdb-bst{flex:1;text-align:right;font-weight:normal;font-size:12px;color:#ccc;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}",
