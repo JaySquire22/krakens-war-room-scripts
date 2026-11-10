@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dibs Caller ✋
 // @namespace    jay-glory-dibs
-// @version      0.4.4
+// @version      0.4.5
 // @description  Call buttons for Glory Command Dibs on the war page, enemy faction pages and enemy profiles. By -TheKraken- [3616083].
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/factions.php*
@@ -22,9 +22,22 @@
 (function () {
   "use strict";
   if (window.top !== window.self) return;
-  if (window.__gdbLoaded) return; window.__gdbLoaded = true;
   var API = "https://dashing-fish-54.eu-west-1.convex.site/chain/api";
-  var VER = "0.4.4";
+  var VER = "0.4.5";
+  // Only one copy may run. Script managers keep each install in its own sandbox (window flags aren't shared),
+  // so the mark goes on the page itself. Two copies would fight over the member list (one sorts, the other unsorts).
+  function dupWarn(other) {
+    var box = document.createElement("div");
+    box.style.cssText = "position:fixed;left:8px;right:8px;top:8px;z-index:2147483647;padding:10px 12px;border-radius:8px;background:#4a1515;color:#fff;font:13px Arial,sans-serif;box-shadow:0 4px 14px rgba(0,0,0,.6)";
+    box.textContent = "\u26a0 Dibs Caller is installed more than once (v" + other + " and v" + VER + "). The copies fight over the member list. Remove the extra one (an old \"Glory Dibs\" counts) in your script manager.";
+    box.onclick = function () { box.remove(); };
+    (document.body || document.documentElement).appendChild(box);
+    setTimeout(function () { box.remove(); }, 15000);
+  }
+  var running = document.documentElement.getAttribute("data-gdb-run");
+  if (running) { if (document.body) dupWarn(running); else document.addEventListener("DOMContentLoaded", function () { dupWarn(running); }); return; }
+  document.documentElement.setAttribute("data-gdb-run", VER);
+  var TOK = String(Math.random()).slice(2, 10), foreign = false;
   var CALL_FROM = 359, LATE = 15;
 
   // ---- storage (Tampermonkey / Violentmonkey / Torn PDA) ----
@@ -329,6 +342,7 @@
   }
 
   function tick() {
+    if (olderCopy()) return; // another copy is running: this one stays out of the way
     poll();
     attach();
     var cells = document.querySelectorAll(".gdb-cell[data-gdb-id]");
@@ -422,12 +436,13 @@
   }
   function bar() {
     var b = document.getElementById("gdb-bar");
+    if (b && b.getAttribute("data-gdb-tok") !== TOK) { if (!foreign) { foreign = true; dupWarn("older"); } return null; } // an older copy's bar
     if (!b || !b.isConnected) {
       if (!/factions\.php/.test(location.href) || Date.now() - anchorAt < 1500) return null; anchorAt = Date.now();
       var an = descAnchor();
       if (!an) return null;
       if (!b) {
-        b = document.createElement("div"); b.id = "gdb-bar"; b.className = "gdb-host";
+        b = document.createElement("div"); b.id = "gdb-bar"; b.className = "gdb-host"; b.setAttribute("data-gdb-tok", TOK);
         b.innerHTML = '<div class="gdb-bh" data-gdb-tog="1"><span class="gdb-bt">\u270b Dibs Caller <small class="gdb-ver">v' + VER + '</small></span><span class="gdb-bst"></span><span class="gdb-chev"></span></div><div class="gdb-body"><div class="gdb-bc"></div><div class="gdb-bb"></div></div>';
       }
       an.parentNode.insertBefore(b, an.nextSibling);
@@ -440,13 +455,13 @@
     var pm = location.href.match(/profiles\.php\?XID=(\d+)/i);
     if (!pm) return null;
     var sec = document.querySelector(".gdb-psec");
-    if (sec && sec.isConnected) return sec;
+    if (sec && sec.isConnected) { if (sec.getAttribute("data-gdb-tok") !== TOK) { if (!foreign) { foreign = true; dupWarn("older"); } return null; } return sec; }
     if (Date.now() - profAt < 1500) return null; profAt = Date.now();
     var act = heading("Actions", ".gdb-psec"), wrap = act;
     while (wrap && wrap.parentElement && !wrap.querySelector('a[href*="sid=attack"], button, [class*="button"]')) wrap = wrap.parentElement;
     if (!act || !wrap || !wrap.parentElement || wrap === document.body) return null;
     var title = act; while (title.parentElement !== wrap) title = title.parentElement;
-    sec = wrap.cloneNode(false); sec.className += " gdb-psec gdb-host"; sec.removeAttribute("id");
+    sec = wrap.cloneNode(false); sec.className += " gdb-psec gdb-host"; sec.removeAttribute("id"); sec.setAttribute("data-gdb-tok", TOK);
     var t2 = title.cloneNode(false); t2.removeAttribute("id"); t2.className += " gdb-pbar"; t2.setAttribute("data-gdb-tog", "1");
     t2.innerHTML = '<span class="gdb-pt">\u270b Dibs Caller <small class="gdb-ver">v' + VER + '</small></span><span class="gdb-bst"></span><span class="gdb-cell gdb-pcell" data-gdb-id="' + pm[1] + '"></span><span class="gdb-chev"></span>';
     var src = null; for (var i = 0; i < wrap.children.length; i++) if (wrap.children[i] !== title) { src = wrap.children[i]; break; }
@@ -457,7 +472,9 @@
     return sec;
   }
   function ui() {
+    if (foreign) return; // another copy is running: this one stays out of the way
     var b = bar() || profBar(), f = document.getElementById("gdb-fab");
+    if (foreign) return;
     if (b) {
       if (f) f.remove();
       var pn = document.getElementById("gdb-panel"); if (pn) pn.remove();
@@ -477,7 +494,7 @@
       return;
     }
     // no bar on this page: the small round button
-    if (!f) { f = document.createElement("div"); f.id = "gdb-fab"; f.title = "Dibs Caller"; f.onclick = panel; document.body.appendChild(f); }
+    if (!f) { f = document.createElement("div"); f.id = "gdb-fab"; f.title = "Dibs Caller"; f.onclick = panel; f.setAttribute("data-gdb-tok", TOK); document.body.appendChild(f); }
     f.textContent = "\u270b"; var fc = !ME ? "out" : active() ? "on" : "idle"; if (f.className !== fc) f.className = fc;
   }
   function panel() {
@@ -518,7 +535,17 @@
     var lbs = document.querySelectorAll(".gdb-sort");
     for (var i = 0; i < lbs.length; i++) if (lbs[i].textContent !== txt) lbs[i].textContent = txt;
   }
+  var dupAt = 0;
+  function olderCopy() {
+    if (foreign) return true;
+    if (Date.now() - dupAt < 2000) return false;
+    dupAt = Date.now();
+    var els = document.querySelectorAll('#gdb-bar, #gdb-fab, .gdb-psec, .gdb-host');
+    for (var i = 0; i < els.length; i++) if (els[i].getAttribute("data-gdb-tok") !== TOK) { foreign = true; dupWarn("older"); return true; }
+    return false;
+  }
   function sortRows() {
+    if (olderCopy()) return 0; // another copy is running: leave the list to it rather than fight
     var mode = get("sort") || "";
     sortLabel();
     if (!active() || Date.now() - sortAt < 500) return 0;
