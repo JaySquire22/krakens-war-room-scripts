@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dibs Caller ✋
 // @namespace    jay-glory-dibs
-// @version      0.3.1
+// @version      0.3.2
 // @description  Call buttons for Glory Command Dibs on the war page, enemy faction pages and enemy profiles. By -TheKraken- [3616083].
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/factions.php*
@@ -115,6 +115,7 @@
       p = parts(id);
       return p ? '<span class="gdb-tcol">' + (p.tm ? '<span class="' + p.cls + '">' + p.tm + "</span>" : "") + '</span><span class="gdb-dcol">' + p.act + "</span>" : "";
     }
+    if (el.className.indexOf("gdb-full") >= 0) return cell(id); // Position/Days kept: timer and Call in the Status column
     if (el.className.indexOf("gdb-in-status") >= 0) { p = parts(id); return p ? p.act : ""; } // Torn's own timer is right there
     return cell(id);
   }
@@ -215,10 +216,11 @@
       // the badge's room goes to the Timer/Dibs columns: names pulled left, member column narrowed to fit them
       var mem = memberCell(row), mw = mem ? box(mem).width : 0;
       if (mem && H.mx == null) H.mx = box(mem).left;
-      hideBadge(row);
-      var need = mem ? pullLeft(mem) : 0;
+      var keepBadge = get("badge") === "1";
+      if (!keepBadge) hideBadge(row);
+      var need = mem && !keepBadge ? pullLeft(mem) : 0;
       // the column is trimmed to fit the dot and the whole name (measured on the first row)
-      if (mem && H.give == null) H.give = need > 60 && need < mw - 8 ? Math.round(mw - need) : 0;
+      if (mem && H.give == null) H.give = !keepBadge && need > 60 && need < mw - 8 ? Math.round(mw - need) : 0;
       // honor-bar names are all the same size, so every row (and the header) gets the same trim
       var give = mem && H.give && mw - H.give > 60 ? H.give : 0;
       if (give) setW(mem, mw - give);
@@ -256,7 +258,7 @@
         // not in chat, our own boxes, or War Room's panel (War Room shows its own Dibs buttons)
         if (a.closest('[class*="chat"], #gdb-panel, #gdb-called, #gdb-bar, #gdb-prof, .gdb-psec, [id^="tws-"], [class*="tws-"], [id^="kwr-"], [class*="kwr-"]')) continue;
         var holder, row = a.closest("li") || a.closest("tr");
-        H = H || memberHeader(a);
+        if (get("cols") !== "1") H = H || memberHeader(a);
         var cellEl = H && row ? wideRow(row, H) : null;
         if (cellEl) {
           // enemy faction page: Position + Days make room for the timer and Call button
@@ -278,7 +280,7 @@
         for (var c = cells.length - 1; c >= 0; c--) {
           if (/okay|hospital|travel|abroad|jail|fallen|fedded|federal|\d+:\d+/i.test(cells[c].textContent) && !cells[c].querySelector('[class*="status"]')) { stc = cells[c]; break; }
         }
-        if (stc) { holder.className += " gdb-in-status"; stc.insertBefore(holder, stc.firstChild); }
+        if (stc) { holder.className += " gdb-in-status" + (get("cols") === "1" && /step=profile/i.test(location.href) ? " gdb-full" : ""); stc.insertBefore(holder, stc.firstChild); }
         else a.insertAdjacentElement("afterend", holder);
       }
     }
@@ -370,7 +372,9 @@
         + '</div>'
       : '<div class="gdb-s">Sign in with your Torn API key (Public is enough). It is checked once by the Glory Command server and not stored.</div>'
         + '<input class="gdb-key" maxlength="16" placeholder="API key" autocomplete="off"><button class="gdb-btn" data-gdb-in="1">Sign in</button><div class="gdb-msg"></div>')
-      + '<div class="gdb-set"><b>Settings</b><label class="gdb-opt"><input type="checkbox" data-gdb-opt="timers"' + (get("timers") === "0" ? "" : " checked") + '> Show timers <i>(turn off if another script already shows them)</i></label></div>'
+      + '<div class="gdb-set"><b>Settings</b><label class="gdb-opt"><input type="checkbox" data-gdb-opt="timers"' + (get("timers") === "0" ? "" : " checked") + '> Show timers <i>(turn off if another script already shows them)</i></label>'
+        + '<label class="gdb-opt"><input type="checkbox" data-gdb-opt="badge"' + (get("badge") === "1" ? " checked" : "") + '> Show faction badges on member lists <i>(reloads the page)</i></label>'
+        + '<label class="gdb-opt"><input type="checkbox" data-gdb-opt="cols"' + (get("cols") === "1" ? " checked" : "") + '> Keep Position and Days columns <i>(timer and Call go in the Status column; no timer sort; reloads the page)</i></label></div>'
       + '<div class="gdb-s" style="margin-top:6px">Calls: hospital and flight timers only, from 5:59 down to 0:16. The first call to reach the server wins. Tap <b>Timer</b> on the member list to sort by it.</div>'
       + (ME ? '<button class="gdb-btn gdb-un" data-gdb-out="1">Sign out</button>' : "");
   }
@@ -480,20 +484,23 @@
     var one = document.querySelector('[data-gdb-pc="1"]'), list = one && one.parentElement;
     if (!list) return;
     var rows = Array.prototype.slice.call(list.children);
-    rows.forEach(function (r, i) { if (r.__gdbIdx == null) r.__gdbIdx = i; });
-    var want = rows.slice();
-    if (mode) {
-      var k = {}; rows.forEach(function (r) { k[r.__gdbIdx] = sortKey(r); });
-      want.sort(function (x, y) {
-        var a = k[x.__gdbIdx], b = k[y.__gdbIdx];
-        if (a == null && b == null) return x.__gdbIdx - y.__gdbIdx;
-        if (a == null) return 1; if (b == null) return -1; // no timer: at the bottom, in their own order
-        return mode === "asc" ? a - b || x.__gdbIdx - y.__gdbIdx : b - a || x.__gdbIdx - y.__gdbIdx;
-      });
-    } else if (!list.__gdbSorted) return;
-    else want.sort(function (x, y) { return x.__gdbIdx - y.__gdbIdx; });
-    list.__gdbSorted = !!mode;
-    for (var i = 0; i < want.length; i++) if (want[i] !== rows[i]) { want.forEach(function (r) { list.appendChild(r); }); break; }
+    if (!mode) {
+      // back to the page's own order
+      if (list.__gdbSorted) { rows.forEach(function (r) { r.style.order = ""; }); list.style.display = list.__gdbDisp[0]; list.style.flexDirection = list.__gdbDisp[1]; list.__gdbSorted = false; }
+      return;
+    }
+    // the rows stay where they are in the page; only the order they're shown in changes (CSS order),
+    // so another script moving rows around (FFScouter's filters, Torn's own updates) can't undo it
+    var k = rows.map(function (r, i) { return { r: r, i: i, v: sortKey(r) }; });
+    k.sort(function (x, y) {
+      if (x.v == null && y.v == null) return x.i - y.i;
+      if (x.v == null) return 1; if (y.v == null) return -1; // no timer: at the bottom, in their own order
+      return (mode === "asc" ? x.v - y.v : y.v - x.v) || x.i - y.i;
+    });
+    if (!list.__gdbSorted) { list.__gdbDisp = [list.style.display, list.style.flexDirection]; list.__gdbSorted = true; }
+    if (list.style.display !== "flex") list.style.display = "flex";
+    if (list.style.flexDirection !== "column") list.style.flexDirection = "column";
+    k.forEach(function (x, n) { if (x.r.style.order !== String(n)) x.r.style.order = String(n); });
   }
 
   // Timer header: sort. Kept from Torn, so Torn's own column sorting doesn't run.
@@ -506,7 +513,10 @@
   document.addEventListener("change", function (e) {
     var o = e.target.closest && e.target.closest("[data-gdb-opt]");
     if (!o) return;
-    set(o.getAttribute("data-gdb-opt"), o.checked ? "1" : "0"); tick();
+    var k = o.getAttribute("data-gdb-opt");
+    set(k, o.checked ? "1" : "0");
+    if (k === "badge" || k === "cols") { location.reload(); return; } // the member list has to be laid out again
+    tick();
   });
   document.addEventListener("click", function (e) {
     var t = e.target;
