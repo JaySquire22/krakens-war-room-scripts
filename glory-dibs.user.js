@@ -1,13 +1,14 @@
 // ==UserScript==
 // @name         Dibs Caller ✋
 // @namespace    jay-glory-dibs
-// @version      0.4.5
+// @version      0.4.6
 // @description  Call buttons for Glory Command Dibs on the war page, enemy faction pages and enemy profiles. By -TheKraken- [3616083].
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/factions.php*
 // @match        https://www.torn.com/profiles.php*
 // @connect      dashing-fish-54.eu-west-1.convex.site
 // @grant        GM_xmlhttpRequest
+// @grant        GM.xmlHttpRequest
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @run-at       document-idle
@@ -23,7 +24,7 @@
   "use strict";
   if (window.top !== window.self) return;
   var API = "https://dashing-fish-54.eu-west-1.convex.site/chain/api";
-  var VER = "0.4.5";
+  var VER = "0.4.6";
   // Only one copy may run. Script managers keep each install in its own sandbox (window flags aren't shared),
   // so the mark goes on the page itself. Two copies would fight over the member list (one sorts, the other unsorts).
   function dupWarn(other) {
@@ -53,11 +54,18 @@
       return Promise.resolve().then(function () { return PDA_httpPost(API, headers, data); })
         .then(function (r) { return parse((r && (r.responseText || r.response || r.body)) || ""); });
     }
-    if (typeof GM_xmlhttpRequest === "function") {
+    var gmx = typeof GM_xmlhttpRequest === "function" ? GM_xmlhttpRequest
+      : typeof GM !== "undefined" && GM && typeof GM.xmlHttpRequest === "function" ? GM.xmlHttpRequest.bind(GM) : null; // Greasemonkey 4 style
+    if (gmx) {
+      // never wait for ever: a script manager that's waiting for you to allow the connection never answers
       return new Promise(function (res, rej) {
-        GM_xmlhttpRequest({ method: "POST", url: API, headers: headers, data: data, timeout: 15000,
-          onload: function (r) { try { res(JSON.parse(r.responseText)); } catch (e) { rej(e); } },
-          onerror: function () { rej(new Error("network")); }, ontimeout: function () { rej(new Error("timeout")); } });
+        var done = false, t = setTimeout(function () { if (!done) { done = true; rej(new Error("noanswer")); } }, 20000);
+        var ok = function (v) { if (!done) { done = true; clearTimeout(t); res(v); } }, bad = function (e) { if (!done) { done = true; clearTimeout(t); rej(e); } };
+        try {
+          gmx({ method: "POST", url: API, headers: headers, data: data, timeout: 15000,
+            onload: function (r) { try { ok(JSON.parse(r.responseText)); } catch (e) { bad(new Error("bad answer (HTTP " + r.status + ")")); } },
+            onerror: function () { bad(new Error("network")); }, ontimeout: function () { bad(new Error("timeout")); }, onabort: function () { bad(new Error("blocked")); } });
+        } catch (e) { bad(e); }
       });
     }
     return fetch(API, { method: "POST", headers: { "Content-Type": "text/plain" }, body: data }).then(function (r) { return r.json(); });
@@ -676,7 +684,13 @@
       if (!j || !j.pass) { m.textContent = (j && j.error) || "Sign-in failed"; return; }
       ME = { pid: j.pid, name: j.name, f: j.f, pass: j.pass, exp: j.exp }; set("me", JSON.stringify(ME));
       S.denied = 0; S.last = 0; refresh();
-    }).catch(function () { bt.textContent = "Sign in"; m.textContent = "Could not reach the server."; });
+    }).catch(function (e) {
+      bt.textContent = "Sign in";
+      var w = String(e && e.message || "");
+      m.textContent = /noanswer|blocked/.test(w)
+        ? "No answer. Your script manager may be asking whether Dibs Caller can connect to dashing-fish-54.eu-west-1.convex.site (check for a new tab or a notice): choose Always allow, then sign in again."
+        : "Could not reach the server (" + (w || "network") + "). Try again.";
+    });
   });
 
   var css = document.createElement("style");
