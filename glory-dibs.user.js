@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dibs Caller ✋
 // @namespace    jay-glory-dibs
-// @version      0.4.3
+// @version      0.4.4
 // @description  Call buttons for Glory Command Dibs on the war page, enemy faction pages and enemy profiles. By -TheKraken- [3616083].
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/factions.php*
@@ -24,7 +24,7 @@
   if (window.top !== window.self) return;
   if (window.__gdbLoaded) return; window.__gdbLoaded = true;
   var API = "https://dashing-fish-54.eu-west-1.convex.site/chain/api";
-  var VER = "0.4.3";
+  var VER = "0.4.4";
   var CALL_FROM = 359, LATE = 15;
 
   // ---- storage (Tampermonkey / Violentmonkey / Torn PDA) ----
@@ -106,7 +106,7 @@
     var theirs = placeOf(t[1], t[5]);
     return theirs !== "abroad" && theirs === mine;
   }
-  function atkBtn(id) { return '<a class="gdb-btn gdb-atk" href="https://www.torn.com/loader.php?sid=attack&user2ID=' + id + '">Attack</a>'; }
+  function atkBtn(id) { return '<a class="gdb-btn gdb-atk" href="https://www.torn.com/loader.php?sid=attack&user2ID=' + id + '">ATK</a>'; }
   function parts(id) {
     var st = S.st, t = st.targets && st.targets[String(id)];
     if (!t) return null;
