@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dibs Caller ✋
 // @namespace    jay-glory-dibs
-// @version      0.3.3
+// @version      0.3.4
 // @description  Call buttons for Glory Command Dibs on the war page, enemy faction pages and enemy profiles. By -TheKraken- [3616083].
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/factions.php*
@@ -474,6 +474,16 @@
     var left = t ? timer(t, nowS()) : null;
     return left == null ? null : left;
   }
+  // The order is set by our own style sheet with !important (each row gets a rank), so it holds even when
+  // another script (FFScouter) or Torn moves the rows or sets its own order on them.
+  var rankCss = null;
+  function rankSheet(n) {
+    if (rankCss && rankCss.__n >= n) return;
+    if (!rankCss) { rankCss = document.createElement("style"); document.head.appendChild(rankCss); }
+    var r = [".gdb-sorted{display:flex!important;flex-direction:column!important}"];
+    for (var i = 0; i < n; i++) r.push('.gdb-sorted>[data-gdb-rank="' + i + '"]{order:' + i + "!important}");
+    rankCss.textContent = r.join("\n"); rankCss.__n = n;
+  }
   function sortRows() {
     var mode = get("sort") || "";
     if (HDR && HDR.p.isConnected) {
@@ -481,28 +491,25 @@
       var txt = (get("timers") === "0" ? "Sort" : "Timer") + " " + (mode === "asc" ? "\u25b2" : mode === "desc" ? "\u25bc" : "\u21c5");
       if (lb && lb.textContent !== txt) lb.textContent = txt;
     }
-    if (!active() || Date.now() - sortAt < 1000) return;
+    if (!active() || Date.now() - sortAt < 500) return;
     sortAt = Date.now();
     var one = document.querySelector('[data-gdb-pc="1"]'), list = one && one.parentElement;
     if (!list) return;
     var rows = Array.prototype.slice.call(list.children);
     if (!mode) {
-      // back to the page's own order
-      if (list.__gdbSorted) { rows.forEach(function (r) { r.style.order = ""; }); list.style.display = list.__gdbDisp[0]; list.style.flexDirection = list.__gdbDisp[1]; list.__gdbSorted = false; }
+      if (list.classList.contains("gdb-sorted")) { list.classList.remove("gdb-sorted"); rows.forEach(function (r) { r.removeAttribute("data-gdb-rank"); }); }
       return;
     }
-    // the rows stay where they are in the page; only the order they're shown in changes (CSS order),
-    // so another script moving rows around (FFScouter's filters, Torn's own updates) can't undo it
+    // ties and rows without a timer keep the page's current order (whatever another script left)
     var k = rows.map(function (r, i) { return { r: r, i: i, v: sortKey(r) }; });
     k.sort(function (x, y) {
       if (x.v == null && y.v == null) return x.i - y.i;
-      if (x.v == null) return 1; if (y.v == null) return -1; // no timer: at the bottom, in their own order
+      if (x.v == null) return 1; if (y.v == null) return -1; // no timer: at the bottom
       return (mode === "asc" ? x.v - y.v : y.v - x.v) || x.i - y.i;
     });
-    if (!list.__gdbSorted) { list.__gdbDisp = [list.style.display, list.style.flexDirection]; list.__gdbSorted = true; }
-    if (list.style.display !== "flex") list.style.display = "flex";
-    if (list.style.flexDirection !== "column") list.style.flexDirection = "column";
-    k.forEach(function (x, n) { if (x.r.style.order !== String(n)) x.r.style.order = String(n); });
+    rankSheet(Math.max(100, k.length + 20));
+    k.forEach(function (x, n) { if (x.r.getAttribute("data-gdb-rank") !== String(n)) x.r.setAttribute("data-gdb-rank", String(n)); });
+    if (!list.classList.contains("gdb-sorted")) list.classList.add("gdb-sorted");
   }
 
   // Whichever sort was picked last wins: picking a sort in FFScouter's controls or on another column
