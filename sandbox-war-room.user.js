@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Sandbox War Room 🧪
 // @namespace    jay-torn-war-script-sandbox
-// @version      1.99.61
+// @version      1.99.62
 // @downloadURL  https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @updateURL    https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @description  [SANDBOX - test build, not for general use] Enemy hospital timers, quick attack links, and a chain timeout alert overlay for Torn faction war pages. Works in Tampermonkey (Firefox) and Torn PDA.
@@ -582,7 +582,7 @@ const __twsOuter = (() => {
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.61';
+  const SCRIPT_VERSION = '1.99.62';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -5660,6 +5660,29 @@ const __twsOuter = (() => {
     }).catch(() => { DIB.inFlight = false; });
   }
   function dibNow() { return (Date.now() + DIB.skew) / 1000; }
+  // where a target will be once out, or where you are (flying: where you land): 'torn', a country, or null
+  const DIB_PLACES = [[/mexic/i, 'Mexico'], [/cayman/i, 'the Cayman Islands'], [/canad/i, 'Canada'], [/hawai/i, 'Hawaii'], [/united kingdom|british|\bUK\b|england|english/i, 'the UK'], [/argentin/i, 'Argentina'], [/switzerland|swiss/i, 'Switzerland'], [/japan/i, 'Japan'], [/china|chinese/i, 'China'], [/\bUAE\b|emirat|dubai/i, 'the UAE'], [/south africa/i, 'South Africa']];
+  function dibPlace(state, desc) {
+    state = String(state || ''); desc = String(desc || '');
+    const c = (DIB_PLACES.find((p) => p[0].test(desc)) || [])[1] || null;
+    if (state === 'Traveling') return /returning to torn/i.test(desc) ? 'Torn' : c;
+    if (state === 'Abroad') return c;
+    if (state === 'Hospital' || state === 'Jail') return c || 'Torn';
+    return state === 'Okay' ? 'Torn' : null;
+  }
+  // you can only call someone you'll be able to hit (the server checks this too)
+  function dibAway(t) {
+    const me = DIB.st && DIB.st.me; if (!me) return false;
+    const a = dibPlace(me[0], me[1]), b = dibPlace(t[1], t[5]);
+    return !!(a && b && a !== b);
+  }
+  document.addEventListener('click', (e) => {
+    const b = e.target && e.target.closest && e.target.closest('[data-dib-away]');
+    if (!b) return;
+    e.preventDefault(); e.stopPropagation();
+    const t = DIB.st && DIB.st.targets && DIB.st.targets[b.getAttribute('data-dib-away')];
+    showToast(`\u2716 You can only call someone you\u2019ll be able to hit: they\u2019ll be in ${t ? dibPlace(t[1], t[5]) : 'another place'} once they\u2019re out.`, { warn: true, duration: 6000 });
+  }, true);
   // the C on someone else's call (Online target, out): who called them, and when
   document.addEventListener('click', (e) => {
     const c = e.target && e.target.closest && e.target.closest('[data-dib-c]');
@@ -5701,6 +5724,7 @@ const __twsOuter = (() => {
     const left = dibTimer(t, dibNow());
     if (left == null) return '';
     if (left <= 15) return '<button class="kwr-dib-btn kwr-dib-off" disabled>Late</button>';
+    if (dibAway(t)) return `<button class="kwr-dib-btn kwr-dib-off" data-dib-away="${escHtml(String(id))}" style="cursor:pointer">Away</button>`;
     if (left > (st.callFrom || 359) && left <= (st.callFrom || 359) + 30) return `<button class="kwr-dib-btn kwr-dib-prep" data-dib-prep="${escHtml(String(id))}">Prepare</button>`;
     if (left > (st.callFrom || 359)) return '<button class="kwr-dib-btn kwr-dib-off" disabled>Call</button>';
     return `<button class="kwr-dib-btn" data-dib-call="${escHtml(String(id))}">Call</button>`;
