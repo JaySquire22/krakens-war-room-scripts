@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Sandbox War Room 🧪
 // @namespace    jay-torn-war-script-sandbox
-// @version      1.99.67
+// @version      1.99.68
 // @downloadURL  https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @updateURL    https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @description  [SANDBOX - test build, not for general use] Enemy hospital timers, quick attack links, and a chain timeout alert overlay for Torn faction war pages. Works in Tampermonkey (Firefox) and Torn PDA.
@@ -582,7 +582,7 @@ const __twsOuter = (() => {
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.67';
+  const SCRIPT_VERSION = '1.99.68';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -787,6 +787,7 @@ const __twsOuter = (() => {
     { key: 'attackSos', group: 'Roster actions', label: '🆘 SOS button on the attack page', hint: 'Small red button in the Faction chat header (attack page, chat open) that puts "HELP NEEDED!" plus the target\u2019s name, level, estimated stats and attack link into faction chat (or copies it if chat isn\u2019t open).' },
     { key: 'onlineHitNow', group: 'Roster actions', label: 'Copy adds "ONLINE HIT NOW!" for targets who are online and out of hospital', requires: 'copyIcons' },
     { key: 'perfTips', group: 'Chain & war', label: '\u26a1 Performance tips', hint: 'When you open War Room, a reminder to close scripts you don\u2019t need during war; and a tip if the page starts struggling during a war.' },
+    { key: 'dibSlot', group: 'Roster actions', label: '\u270b Dibs: Call and ATK share one button', hint: 'Greyed Call until 30s before calling opens, then Prepare, then Call until 0:15, then the greyed ATK, which turns green as they come out. Off = Call and ATK side by side.', requires: 'dibs' },
     { key: 'dibs', group: 'Roster actions', label: '\u270b Dibs: call targets with Glory Command', hint: 'Call buttons next to enemies during a Dibs war: hospital and flight timers only, from 5:59 down to 0:16. The first call to reach the server wins. Only one of Dibs or Called (C) can be on.' },
     { key: 'chatCalls', group: 'Roster actions', label: '\u260e Called: C next to targets called in Faction chat', hint: 'While Faction chat is open, a message with an enemy\u2019s name and a time (e.g. Killer in 5, KILLER IN 4:48) puts a C next to them in the Target tab and the Attacks log, if the time is 6:10 or less. It clears once they\u2019re hospitalised again. Tap the C to see who called them and their message.', def: false },
     { key: 'atkEtaCopy', group: 'Roster actions', label: 'Tap a hospitalised target\u2019s ATK to send its timer to chat', hint: 'e.g. \u201cKRAKEN IN 7:48\u201d \u2013 the time left on their hospital timer.' },
@@ -854,7 +855,7 @@ const __twsOuter = (() => {
   const COMPLIANCE_OFF = new Set(['bloodQuickUse', 'bloodPreload', 'tempPreload']);
   // Analytics only ever exists in the Sandbox build.
   const IS_SBX_BUILD = 'Sandbox War Room'.indexOf('Sandbox') === 0; // false in the Krakens War Room build
-  const SANDBOX_ONLY = 'Sandbox War Room'.indexOf('Sandbox') === 0 ? new Set() : new Set(['perfMonitor', 'activityHistory', 'chatCalls', 'dibs', 'scrollText', 'hospIcon']); // activityHistory: Sandbox-only until tested; chatCalls: kept for a Glory build
+  const SANDBOX_ONLY = 'Sandbox War Room'.indexOf('Sandbox') === 0 ? new Set() : new Set(['perfMonitor', 'activityHistory', 'chatCalls', 'dibs', 'scrollText', 'hospIcon', 'dibSlot']); // activityHistory: Sandbox-only until tested; chatCalls: kept for a Glory build
   function featureOn(key) {
     if (COMPLIANCE_OFF.has(key) || SANDBOX_ONLY.has(key)) return false;
     const f = FEATURE_MAP[key];
@@ -5738,12 +5739,14 @@ const __twsOuter = (() => {
     if (d) return `<span class="kwr-dib-taken">\u270b ${escHtml(d.byName)}${d.myMs ? ` <i>+${((d.myMs - d.ms) / 1000).toFixed(2)}s</i>` : ''}</span>`;
     const left = dibTimer(t, dibNow());
     if (left == null) return '';
-    if (left <= 15) return '<button class="kwr-dib-btn kwr-dib-off" disabled>Late</button>';
+    if (left <= 15) return featureOn('dibSlot') ? '' : '<button class="kwr-dib-btn kwr-dib-off" disabled>Late</button>'; // one slot: the greyed ATK shows from here
     if (dibAway(t)) return `<button class="kwr-dib-btn kwr-dib-off" data-dib-away="${escHtml(String(id))}" style="cursor:pointer">Away</button>`;
     if (left > (st.callFrom || 359) && left <= (st.callFrom || 359) + 30) return `<button class="kwr-dib-btn kwr-dib-prep" data-dib-prep="${escHtml(String(id))}">Prepare</button>`;
     if (left > (st.callFrom || 359)) return '<button class="kwr-dib-btn kwr-dib-off" disabled>Call</button>';
     return `<button class="kwr-dib-btn" data-dib-call="${escHtml(String(id))}">Call</button>`;
   }
+  // One slot: while the dib cell holds a button (greyed Call, Prepare, Call, Away) it takes the ATK button's place
+  function dibSlotOn(h) { return featureOn('dibSlot') && h.indexOf('<button') === 0; }
   function dibCalledHtml() {
     const st = DIB.st, me = dibOwnId(), d = (st.dibs || []).find((x) => x.by === me);
     if (!d) return '';
@@ -5793,7 +5796,7 @@ const __twsOuter = (() => {
     dibPoll();
     const on = dibActive();
     dibPrepRender(on);
-    document.querySelectorAll('.kwr-dib[data-dib-id]').forEach((el) => { const h = on ? dibCellHtml(el.getAttribute('data-dib-id')) : ''; if (el.__h !== h) { el.__h = h; el.innerHTML = h; } });
+    document.querySelectorAll('.kwr-dib[data-dib-id]').forEach((el) => { const h = on ? dibCellHtml(el.getAttribute('data-dib-id')) : ''; if (el.__h !== h) { el.__h = h; el.innerHTML = h; el.classList.toggle('kwr-dib-slot', dibSlotOn(h)); } });
     const box = document.getElementById('kwr-dib-called');
     if (box) { const h = on ? dibCalledHtml() : ''; if (box.__h !== h) { box.__h = h; box.innerHTML = h; box.style.display = h ? '' : 'none'; } }
   }
@@ -9536,6 +9539,9 @@ const __twsOuter = (() => {
       line-height: 1.4;
     }
     .kwr-dib { display: inline-flex; align-items: center; margin-right: 4px; }
+    .kwr-dib.kwr-dib-slot { margin-right: 0; }
+    .kwr-dib.kwr-dib-slot ~ .tws-atk { display: none; }
+    .kwr-dib.kwr-dib-slot .kwr-dib-btn { min-width: 40px; }
     .kwr-dib:empty { display: none; }
     .kwr-dib-btn { border: none; border-radius: 4px; padding: 3px 8px; font-size: 11px; font-weight: bold; background: #2dd4bf; color: #04201c; cursor: pointer; -webkit-user-select: none; user-select: none; touch-action: manipulation; }
     .kwr-dib-btn.kwr-dib-off { background: #333; color: #777; cursor: default; }
@@ -12094,7 +12100,7 @@ const __twsOuter = (() => {
         <div class="tws-row">
           <span class="tws-name" data-row-id="${m.id}">${ffDot}<a class="tws-name-link ${themeId === 'ff' ? '' : lastActionClass} ${flashClass}"${ffStyle} target="_blank" href="${profileUrl}">${m.name}</a> <small class="${themeId === 'ff' ? '' : lastActionClass}"${ffStyle}>(Lvl ${m.level})</small>${viewSide === 'target' ? callBadgeHtml(m.id) : ''}${figureHtml}${bountyIconHtml}${copyIconHtml}${starHtml}${homeCardHtml}</span>
           <span class="tws-time ${statusClass}${flashClass ? ' tws-name-flash' : ''}${travelOn ? ' tws-travel-eta' : ''}" data-time-id="${m.id}"${travelOn ? ` data-travel-id="${m.id}" title="Tap for every travel method"` : ''}>${timeLabel}</span>
-          ${(showAttack && featureOn('dibs')) ? `<span class="kwr-dib" data-dib-id="${m.id}">${dibActive() ? dibCellHtml(m.id) : ''}</span>` : ''}
+          ${(showAttack && featureOn('dibs')) ? (() => { const dh = dibActive() ? dibCellHtml(m.id) : ''; return `<span class="kwr-dib${dibSlotOn(dh) ? ' kwr-dib-slot' : ''}" data-dib-id="${m.id}">${dh}</span>`; })() : ''}
           ${actionHtml}
         </div>
       `;
