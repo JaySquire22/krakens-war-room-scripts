@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Glory War Room ⚔️
 // @namespace    jay-glory-war-room
-// @version      1.99.63
+// @version      1.99.68
 // @downloadURL  https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/glory-war-room.user.js
 // @updateURL    https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/glory-war-room.user.js
 // @description  [Glory factions only] Enemy hospital timers, quick attack links, and a chain timeout alert overlay for Torn faction war pages. Works in Tampermonkey (Firefox) and Torn PDA.
@@ -582,7 +582,7 @@ const __twsOuter = (() => {
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.63';
+  const SCRIPT_VERSION = '1.99.68';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -766,6 +766,8 @@ const __twsOuter = (() => {
 
     // --- Roster display ---
     { key: 'nameColors', group: 'Roster display', label: 'Colour names by online status' },
+    { key: 'hospIcon', group: 'Roster display', label: '\u271a Red cross instead of the word Hospital', hint: 'Hospital timers show a red cross and the time left, leaving more room for names.' },
+    { key: 'scrollText', def: false, group: 'Roster display', label: '\u2194 Scroll names that don\u2019t fit', hint: 'On narrow screens, names cut off with \u2026 scroll round like a ticker, pausing for 3 seconds between loops.' },
     { key: 'onlineFlash', group: 'Roster display', label: 'Flash names that are online and attackable' },
     { key: 'travelFlags', group: 'Roster display', label: 'Country flags: travelling, abroad, or in an overseas hospital', hint: 'Shown next to the status / hospital timer.' },
     { key: 'travelTimers', group: 'Roster display', label: '✈ Estimated landing timers for travellers', hint: 'Assumes Airstrip unless the player\u2019s usual method has been learned from a past flight. Tap a travel timer to see every method, and tap a method to make it that member\u2019s default.' },
@@ -785,6 +787,7 @@ const __twsOuter = (() => {
     { key: 'attackSos', group: 'Roster actions', label: '🆘 SOS button on the attack page', hint: 'Small red button in the Faction chat header (attack page, chat open) that puts "HELP NEEDED!" plus the target\u2019s name, level, estimated stats and attack link into faction chat (or copies it if chat isn\u2019t open).' },
     { key: 'onlineHitNow', group: 'Roster actions', label: 'Copy adds "ONLINE HIT NOW!" for targets who are online and out of hospital', requires: 'copyIcons' },
     { key: 'perfTips', group: 'Chain & war', label: '\u26a1 Performance tips', hint: 'When you open War Room, a reminder to close scripts you don\u2019t need during war; and a tip if the page starts struggling during a war.' },
+    { key: 'dibSlot', group: 'Roster actions', label: '\u270b Dibs: Call and ATK share one button', hint: 'Greyed Call until 30s before calling opens, then Prepare, then Call until 0:15, then the greyed ATK, which turns green as they come out. Off = Call and ATK side by side.', requires: 'dibs' },
     { key: 'dibs', group: 'Roster actions', label: '\u270b Dibs: call targets with Glory Command', hint: 'Call buttons next to enemies during a Dibs war: hospital and flight timers only, from 5:59 down to 0:16. The first call to reach the server wins. Only one of Dibs or Called (C) can be on.' },
     { key: 'chatCalls', group: 'Roster actions', label: '\u260e Called: C next to targets called in Faction chat', hint: 'While Faction chat is open, a message with an enemy\u2019s name and a time (e.g. Killer in 5, KILLER IN 4:48) puts a C next to them in the Target tab and the Attacks log, if the time is 6:10 or less. It clears once they\u2019re hospitalised again. Tap the C to see who called them and their message.', def: false },
     { key: 'atkEtaCopy', group: 'Roster actions', label: 'Tap a hospitalised target\u2019s ATK to send its timer to chat', hint: 'e.g. \u201cKRAKEN IN 7:48\u201d \u2013 the time left on their hospital timer.' },
@@ -5731,12 +5734,14 @@ const __twsOuter = (() => {
     if (d) return `<span class="kwr-dib-taken">\u270b ${escHtml(d.byName)}${d.myMs ? ` <i>+${((d.myMs - d.ms) / 1000).toFixed(2)}s</i>` : ''}</span>`;
     const left = dibTimer(t, dibNow());
     if (left == null) return '';
-    if (left <= 15) return '<button class="kwr-dib-btn kwr-dib-off" disabled>Late</button>';
+    if (left <= 15) return featureOn('dibSlot') ? '' : '<button class="kwr-dib-btn kwr-dib-off" disabled>Late</button>'; // one slot: the greyed ATK shows from here
     if (dibAway(t)) return `<button class="kwr-dib-btn kwr-dib-off" data-dib-away="${escHtml(String(id))}" style="cursor:pointer">Away</button>`;
     if (left > (st.callFrom || 359) && left <= (st.callFrom || 359) + 30) return `<button class="kwr-dib-btn kwr-dib-prep" data-dib-prep="${escHtml(String(id))}">Prepare</button>`;
     if (left > (st.callFrom || 359)) return '<button class="kwr-dib-btn kwr-dib-off" disabled>Call</button>';
     return `<button class="kwr-dib-btn" data-dib-call="${escHtml(String(id))}">Call</button>`;
   }
+  // One slot: while the dib cell holds a button (greyed Call, Prepare, Call, Away) it takes the ATK button's place
+  function dibSlotOn(h) { return featureOn('dibSlot') && h.indexOf('<button') === 0; }
   function dibCalledHtml() {
     const st = DIB.st, me = dibOwnId(), d = (st.dibs || []).find((x) => x.by === me);
     if (!d) return '';
@@ -5786,7 +5791,7 @@ const __twsOuter = (() => {
     dibPoll();
     const on = dibActive();
     dibPrepRender(on);
-    document.querySelectorAll('.kwr-dib[data-dib-id]').forEach((el) => { const h = on ? dibCellHtml(el.getAttribute('data-dib-id')) : ''; if (el.__h !== h) { el.__h = h; el.innerHTML = h; } });
+    document.querySelectorAll('.kwr-dib[data-dib-id]').forEach((el) => { const h = on ? dibCellHtml(el.getAttribute('data-dib-id')) : ''; if (el.__h !== h) { el.__h = h; el.innerHTML = h; el.classList.toggle('kwr-dib-slot', dibSlotOn(h)); } });
     const box = document.getElementById('kwr-dib-called');
     if (box) { const h = on ? dibCalledHtml() : ''; if (box.__h !== h) { box.__h = h; box.innerHTML = h; box.style.display = h ? '' : 'none'; } }
   }
@@ -6422,6 +6427,8 @@ const __twsOuter = (() => {
   // "vs <enemy>" name until it expires). Re-applied on every render.
   let headerFlash = null; // { text, cls, until }
   // Red circle with a white cross, used in the health / hospital banner.
+  // Red cross on a white rounded square with a dark outline, shown instead of the word Hospital on hospital timers
+  const HOSP_ICON = '<svg class="tws-hosp-ico" viewBox="0 0 20 20" width="15" height="15" aria-label="Hospital" role="img"><rect x="0.75" y="0.75" width="18.5" height="18.5" rx="4" ry="4" fill="#fff" stroke="#333" stroke-width="1.5"/><rect x="8.1" y="3.25" width="3.8" height="13.5" fill="#ff0000"/><rect x="3.25" y="8.1" width="13.5" height="3.8" fill="#ff0000"/></svg>';
   const MED_ICON = '<svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><rect x="0" y="0" width="20" height="20" rx="5" ry="5" fill="#fff"/><circle cx="10" cy="10" r="7.5" fill="#e02424"/><rect x="8.7" y="5.5" width="2.6" height="9" fill="#fff"/><rect x="5.5" y="8.7" width="9" height="2.6" fill="#fff"/></svg>';
 
   // ---------------------------------------------------------------------
@@ -9287,6 +9294,7 @@ const __twsOuter = (() => {
     // Redrawing everything each second made the page, and other scripts watching it, lag.
     if (freedNow || perfTickCount % 15 === 0) safeRender(); else updateInPlace();
     try { lagTick(); } catch (e) { /* ignore */ }
+    try { marqueeScan(); } catch (e) { /* ignore */ }
     if (wideActive() && perfTickCount % 5 === 0) renderAtkLog();
   }
 
@@ -9483,6 +9491,7 @@ const __twsOuter = (() => {
     .tws-name.tws-copied-flash { background: #1e4620; border-radius: 4px; }
     .tws-name.tws-copy-failed-flash { background: #4a1e1e; border-radius: 4px; }
     .tws-name-link { color: inherit; text-decoration: none; }
+    .tws-mq { text-overflow: clip !important; }
     .tws-name-link:active { text-decoration: underline; }
     .tws-name-online { color: #7cfc7c; }
     .tws-name-idle { color: #ffd27c; }
@@ -9510,6 +9519,7 @@ const __twsOuter = (() => {
     .tws-copy-icon { cursor: pointer; color: #6ab0de; font-size: 13px; }
     .tws-bounty-icon { cursor: pointer; font-size: 12px; border-radius: 4px; padding: 0 2px; text-decoration: none; filter: grayscale(1) brightness(0.7); }
     .tws-time { min-width: 60px; text-align: right; margin-right: 6px; white-space: nowrap; }
+    .tws-hosp-ico { vertical-align: -2px; }
     .tws-status-hospital { color: #ff7c7c; }
     .tws-status-okay { color: #7cfc7c; }
     .tws-respect { color: #7ec8e3; opacity: 0.9; }
@@ -9524,6 +9534,9 @@ const __twsOuter = (() => {
       line-height: 1.4;
     }
     .kwr-dib { display: inline-flex; align-items: center; margin-right: 4px; }
+    .kwr-dib.kwr-dib-slot { margin-right: 0; }
+    .kwr-dib.kwr-dib-slot ~ .tws-atk { display: none; }
+    .kwr-dib.kwr-dib-slot .kwr-dib-btn { min-width: 40px; }
     .kwr-dib:empty { display: none; }
     .kwr-dib-btn { border: none; border-radius: 4px; padding: 3px 8px; font-size: 11px; font-weight: bold; background: #2dd4bf; color: #04201c; cursor: pointer; -webkit-user-select: none; user-select: none; touch-action: manipulation; }
     .kwr-dib-btn.kwr-dib-off { background: #333; color: #777; cursor: default; }
@@ -11100,7 +11113,7 @@ const __twsOuter = (() => {
       ? parseCountryFlag(m.description)
       : '';
     const travelOn = featureOn('travelTimers') && m.state === 'Traveling' && !!travelDestOf(m.description);
-    const baseLabel = m.state === 'Hospital' ? `Hospital ${fmtDuration(m.remaining)}` : ((travelOn && travelLabel(m)) || m.state);
+    const baseLabel = m.state === 'Hospital' ? `${featureOn('hospIcon') ? HOSP_ICON : 'Hospital'} ${fmtDuration(m.remaining)}` : ((travelOn && travelLabel(m)) || m.state);
     return flag ? `${flag} ${baseLabel}` : baseLabel;
   }
 
@@ -11163,6 +11176,48 @@ const __twsOuter = (() => {
     const lighter = perfMode() === 'full' ? 'Balanced or Lite' : perfMode() === 'balanced' ? 'Lite' : '';
     showToast(`\ud83d\udc22 This page is struggling to keep up. ${lighter ? `Try ${lighter} mode (\u2699 Advanced) and ` : ''}close other scripts you don\u2019t need right now.`, { warn: true, duration: 9000 });
   }
+  // Names that don't fit (cut off with ...) scroll like a ticker: still for 3s, slide out to the left,
+  // come back in from the right, stop, repeat. Each element is measured once (new ones appear after a
+  // redraw); the animation phase follows the clock, so a redraw doesn't restart it.
+  const MQ_HOLD = 3000; // ms still between loops
+  const MQ_SPEED = 40; // px per second
+  const MQ_SEL = '.tws-name, .tws-enemy-name, .tws-log-main > span:first-child';
+  function marqueeClear() {
+    if (!panel) return;
+    panel.querySelectorAll('[data-mqc]').forEach((el) => {
+      delete el.dataset.mqc;
+      el.classList.remove('tws-mq');
+      if (el._twsMq) { try { el._twsMq.cancel(); } catch (e) { /* ignore */ } el._twsMq = null; }
+    });
+  }
+  function marqueeScan() {
+    if (!panel || showSettings || getCfg(STORE_KEYS.collapsed, false) || document.visibilityState === 'hidden') return;
+    if (!featureOn('scrollText')) { if (panel.querySelector('[data-mqc]')) marqueeClear(); return; }
+    const found = [];
+    panel.querySelectorAll(MQ_SEL).forEach((el) => {
+      if (el.dataset.mqc || !el.clientWidth) return;
+      found.push([el, el.scrollWidth, el.clientWidth]);
+    });
+    const t = Date.now();
+    found.forEach(([el, sw, cw]) => {
+      el.dataset.mqc = '1';
+      if (sw - cw <= 3 || typeof el.animate !== 'function') return;
+      const out = sw + 6, back = cw; // px: slide out to the left, then in from the right
+      const move = ((out + back) / MQ_SPEED) * 1000;
+      const dur = MQ_HOLD + move;
+      const h = MQ_HOLD / dur, a = h + (out / MQ_SPEED * 1000) / dur;
+      el.classList.add('tws-mq');
+      el._twsMq = el.animate([
+        { textIndent: '0px', offset: 0 },
+        { textIndent: '0px', offset: h },
+        { textIndent: `-${out}px`, offset: a },
+        { textIndent: `${back}px`, offset: Math.min(a + 0.0001, 0.9999) },
+        { textIndent: '0px', offset: 1 },
+      ], { duration: dur, iterations: Infinity, easing: 'linear' });
+      el._twsMq.currentTime = t % dur;
+    });
+  }
+  window.addEventListener('resize', () => { try { marqueeClear(); } catch (e) { /* ignore */ } });
   function updateInPlace__raw() {
     if (!panel || showSettings || getCfg(STORE_KEYS.collapsed, false)) return;
     const byId = {};
@@ -12040,7 +12095,7 @@ const __twsOuter = (() => {
         <div class="tws-row">
           <span class="tws-name" data-row-id="${m.id}">${ffDot}<a class="tws-name-link ${themeId === 'ff' ? '' : lastActionClass} ${flashClass}"${ffStyle} target="_blank" href="${profileUrl}">${m.name}</a> <small class="${themeId === 'ff' ? '' : lastActionClass}"${ffStyle}>(Lvl ${m.level})</small>${viewSide === 'target' ? callBadgeHtml(m.id) : ''}${figureHtml}${bountyIconHtml}${copyIconHtml}${starHtml}${homeCardHtml}</span>
           <span class="tws-time ${statusClass}${flashClass ? ' tws-name-flash' : ''}${travelOn ? ' tws-travel-eta' : ''}" data-time-id="${m.id}"${travelOn ? ` data-travel-id="${m.id}" title="Tap for every travel method"` : ''}>${timeLabel}</span>
-          ${(showAttack && featureOn('dibs')) ? `<span class="kwr-dib" data-dib-id="${m.id}">${dibActive() ? dibCellHtml(m.id) : ''}</span>` : ''}
+          ${(showAttack && featureOn('dibs')) ? (() => { const dh = dibActive() ? dibCellHtml(m.id) : ''; return `<span class="kwr-dib${dibSlotOn(dh) ? ' kwr-dib-slot' : ''}" data-dib-id="${m.id}">${dh}</span>`; })() : ''}
           ${actionHtml}
         </div>
       `;
