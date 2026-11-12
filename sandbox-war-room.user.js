@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Sandbox War Room 🧪
 // @namespace    jay-torn-war-script-sandbox
-// @version      1.99.60
+// @version      1.99.61
 // @downloadURL  https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @updateURL    https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @description  [SANDBOX - test build, not for general use] Enemy hospital timers, quick attack links, and a chain timeout alert overlay for Torn faction war pages. Works in Tampermonkey (Firefox) and Torn PDA.
@@ -582,7 +582,7 @@ const __twsOuter = (() => {
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.60';
+  const SCRIPT_VERSION = '1.99.61';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -5660,6 +5660,15 @@ const __twsOuter = (() => {
     }).catch(() => { DIB.inFlight = false; });
   }
   function dibNow() { return (Date.now() + DIB.skew) / 1000; }
+  // the C on someone else's call (Online target, out): who called them, and when
+  document.addEventListener('click', (e) => {
+    const c = e.target && e.target.closest && e.target.closest('[data-dib-c]');
+    if (!c) return;
+    e.preventDefault(); e.stopPropagation();
+    const id = Number(c.getAttribute('data-dib-c')), st = DIB.st, d = st && (st.dibs || []).find((x) => x.t === id);
+    const t = st && st.targets && st.targets[String(id)];
+    if (d) showToast(`\u270b ${t ? t[0] + ' was called' : 'Called'} by ${d.byName} at ${dibTime(d.ms)} TCT${dibLeft(d.leftMs)}. They\u2019re Online, so anyone can hit them.`, { duration: 6000 });
+  }, true);
   // every 10s (the server refreshes enemy statuses every 10s), every 5s while a callable timer is close or
   // you hold a dib, once a minute while Dibs is off or against another faction
   function dibPollGap() {
@@ -5684,6 +5693,10 @@ const __twsOuter = (() => {
     if (!t) return '';
     const me = dibOwnId(), d = (st.dibs || []).find((x) => x.t === Number(id));
     if (d && d.by === me) return '<span class="kwr-dib-yours">\u2705</span>';
+    // someone else's call on a target who's out and showing Online: open to anyone, so a tappable C (who called
+    // them), for the 3 minutes after they came out
+    if (d && t[3] === 'on' && dibTimer(t, dibNow()) == null && d.outAt && dibNow() - d.outAt <= (st.holdSec || 180))
+      return `<span class="tws-call kwr-dib-c" data-dib-c="${escHtml(String(id))}" title="Called by ${escHtml(d.byName)}">C</span>`;
     if (d) return `<span class="kwr-dib-taken">\u270b ${escHtml(d.byName)}${d.myMs ? ` <i>+${((d.myMs - d.ms) / 1000).toFixed(2)}s</i>` : ''}</span>`;
     const left = dibTimer(t, dibNow());
     if (left == null) return '';
