@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dibs Caller ✋
 // @namespace    jay-glory-dibs
-// @version      0.4.9
+// @version      0.5.0
 // @description  Call buttons for Glory Command Dibs on the war page, enemy faction pages and enemy profiles. By -TheKraken- [3616083].
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/factions.php*
@@ -24,7 +24,7 @@
   "use strict";
   if (window.top !== window.self) return;
   var API = "https://dashing-fish-54.eu-west-1.convex.site/chain/api";
-  var VER = "0.4.9";
+  var VER = "0.5.0";
   // Only one copy may run. Script managers keep each install in its own sandbox (window flags aren't shared),
   // so the mark goes on the page itself. Two copies would fight over the member list (one sorts, the other unsorts).
   function dupWarn(other) {
@@ -109,7 +109,7 @@
         else S.denied = Date.now() + 10 * 60 * 1000; // not in the trial: ask again in 10 minutes
         ui(); return;
       }
-      S.err = ""; S.st = j;
+      S.err = ""; S.st = j; tieNews(j);
       if (j.nowMs && (S.rtt == null || q1 - q0 <= S.rtt * 1.5)) { S.skew = j.nowMs - (q0 + q1) / 2; S.rtt = S.rtt == null ? q1 - q0 : Math.min(q1 - q0, S.rtt * 1.2); }
       ui();
     }).catch(function () { S.inFlight = false; });
@@ -144,7 +144,7 @@
   function callPlace(state, desc) {
     state = String(state || ""); desc = String(desc || "");
     var c = null; for (var i = 0; i < FLAGS.length; i++) if (FLAGS[i][0].test(desc)) { c = "c" + i; break; }
-    if (state === "Traveling") return /returning to torn/i.test(desc) ? "torn" : c;
+    if (state === "Traveling") return /\bto torn\b|^returning/i.test(desc) ? "torn" : c;
     if (state === "Abroad") return c;
     if (state === "Hospital" || state === "Jail") return c || "torn";
     return state === "Okay" ? "torn" : null;
@@ -403,11 +403,24 @@
     t.className = kind || ""; t.textContent = text; t.style.display = "block";
     clearTimeout(t.__t); t.__t = setTimeout(function () { t.style.display = "none"; }, kind === "bad" ? 8000 : 5000);
   }
+  // a same-millisecond tie decided by random draw: tell everyone involved, once
+  var tieSeen = {};
+  function tieNews(st) {
+    (st.dibs || []).forEach(function (d) {
+      if (!d.tie) return;
+      var k = d.t + ":" + d.by + ":" + d.tie; if (tieSeen[k]) return;
+      var t = st.targets && st.targets[String(d.t)], nm = t ? t[0] : "#" + d.t;
+      if (d.by === ME.pid) { tieSeen[k] = 1; toast("\ud83c\udfb2 " + nm + " is yours by a random draw: someone called at the exact same millisecond (" + tms(d.ms) + " TCT).", "ok"); }
+      else if (d.myMs && d.myMs === d.ms) { tieSeen[k] = 1; toast("\ud83c\udfb2 You and " + d.byName + " called " + nm + " at the exact same millisecond (" + tms(d.ms) + " TCT). A random draw gave it to " + d.byName + ".", "bad"); }
+    });
+  }
   function call(id) {
     if (S.busy) return; S.busy = true;
     api({ op: "dibCall", target: Number(id) }).then(function (j) {
       S.busy = false; S.last = 0;
-      if (j && j.ok) toast("\u2705 It's yours! Called " + tms(j.ms) + " TCT" + leftTxt(j.leftMs) + (j.online ? ". They are ONLINE: if still online when out, anyone can hit them." : "."), "ok");
+      if (j && j.ok && j.tie) { tieSeen[id + ":" + ME.pid + ":" + j.tie] = 1; toast("\ud83c\udfb2 It's yours by a random draw! You and " + j.tieWith + " called at the exact same millisecond (" + tms(j.ms) + " TCT), so the server drew lots." + (j.online ? " They are ONLINE: if still online when out, anyone can hit them." : ""), "ok"); }
+      else if (j && j.why === "taken" && j.tie) toast("\ud83c\udfb2 " + j.msg, "bad");
+      else if (j && j.ok) toast("\u2705 It's yours! Called " + tms(j.ms) + " TCT" + leftTxt(j.leftMs) + (j.online ? ". They are ONLINE: if still online when out, anyone can hit them." : "."), "ok");
       else if (j && j.why === "taken") toast("\u2716 Taken by " + j.byName + ", called " + tms(j.winMs) + leftTxt(j.winLeftMs) + ". Yours registered " + tms(j.ms) + (j.ms > j.winMs ? " (" + ((j.ms - j.winMs) / 1000).toFixed(3) + "s too late)" : "") + ".", "bad");
       else toast("\u2716 " + ((j && (j.msg || j.error)) || "Call failed") + (j && j.ms ? " (registered " + tms(j.ms) + ")" : ""), "warn");
       tick();
