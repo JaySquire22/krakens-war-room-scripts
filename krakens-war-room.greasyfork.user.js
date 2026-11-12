@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Krakens War Room 🐙
 // @namespace    jay-torn-war-script
-// @version      1.99.54
+// @version      1.99.55
 // @description  Ranked-war companion for Torn: live enemy roster with hospital timers, chain timers & alerts, attack/retal links, targets, attacks log, battle-stat estimates and a PC wide mode. Works in Tampermonkey and Torn PDA. 2-hour free trial, then 1 Xanax = 7 days.
 // @author       -TheKraken- [3616083]
 // @copyright    2026, -TheKraken- [3616083] - All rights reserved
@@ -584,7 +584,7 @@ const __twsOuter = (() => {
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.54';
+  const SCRIPT_VERSION = '1.99.55';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -768,6 +768,8 @@ const __twsOuter = (() => {
 
     // --- Roster display ---
     { key: 'nameColors', group: 'Roster display', label: 'Colour names by online status' },
+    { key: 'scrollText', def: false, group: 'Roster display', label: '\u2194 Scroll names that don\u2019t fit', hint: 'On narrow screens, names cut off with \u2026 scroll round like a ticker, pausing for 3 seconds between loops.' },
+    { key: 'hospIcon', group: 'Roster display', label: '\u271a Red cross instead of the word Hospital', hint: 'Hospital timers show a red cross and the time left, leaving more room for names.' },
     { key: 'onlineFlash', group: 'Roster display', label: 'Flash names that are online and attackable' },
     { key: 'travelFlags', group: 'Roster display', label: 'Country flags: travelling, abroad, or in an overseas hospital', hint: 'Shown next to the status / hospital timer.' },
     { key: 'travelTimers', group: 'Roster display', label: '✈ Estimated landing timers for travellers', hint: 'Assumes Airstrip unless the player\u2019s usual method has been learned from a past flight. Tap a travel timer to see every method, and tap a method to make it that member\u2019s default.' },
@@ -6175,6 +6177,8 @@ const __twsOuter = (() => {
   // "vs <enemy>" name until it expires). Re-applied on every render.
   let headerFlash = null; // { text, cls, until }
   // Red circle with a white cross, used in the health / hospital banner.
+  // Red cross on a white rounded square with a dark outline, shown instead of the word Hospital on hospital timers
+  const HOSP_ICON = '<svg class="tws-hosp-ico" viewBox="0 0 20 20" width="15" height="15" aria-label="Hospital" role="img"><rect x="0.75" y="0.75" width="18.5" height="18.5" rx="4" ry="4" fill="#fff" stroke="#333" stroke-width="1.5"/><rect x="8.1" y="3.25" width="3.8" height="13.5" fill="#ff0000"/><rect x="3.25" y="8.1" width="13.5" height="3.8" fill="#ff0000"/></svg>';
   const MED_ICON = '<svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><rect x="0" y="0" width="20" height="20" rx="5" ry="5" fill="#fff"/><circle cx="10" cy="10" r="7.5" fill="#e02424"/><rect x="8.7" y="5.5" width="2.6" height="9" fill="#fff"/><rect x="5.5" y="8.7" width="9" height="2.6" fill="#fff"/></svg>';
 
   // ---------------------------------------------------------------------
@@ -9036,6 +9040,7 @@ const __twsOuter = (() => {
     // Redrawing everything each second made the page, and other scripts watching it, lag.
     if (freedNow || perfTickCount % 15 === 0) safeRender(); else updateInPlace();
     try { lagTick(); } catch (e) { /* ignore */ }
+    try { marqueeScan(); } catch (e) { /* ignore */ }
     if (wideActive() && perfTickCount % 5 === 0) renderAtkLog();
   }
 
@@ -9232,6 +9237,7 @@ const __twsOuter = (() => {
     .tws-name.tws-copied-flash { background: #1e4620; border-radius: 4px; }
     .tws-name.tws-copy-failed-flash { background: #4a1e1e; border-radius: 4px; }
     .tws-name-link { color: inherit; text-decoration: none; }
+    .tws-mq { text-overflow: clip !important; }
     .tws-name-link:active { text-decoration: underline; }
     .tws-name-online { color: #7cfc7c; }
     .tws-name-idle { color: #ffd27c; }
@@ -9258,6 +9264,7 @@ const __twsOuter = (() => {
     .tws-copy-icon { cursor: pointer; color: #6ab0de; font-size: 13px; }
     .tws-bounty-icon { cursor: pointer; font-size: 12px; border-radius: 4px; padding: 0 2px; text-decoration: none; filter: grayscale(1) brightness(0.7); }
     .tws-time { min-width: 60px; text-align: right; margin-right: 6px; white-space: nowrap; }
+    .tws-hosp-ico { vertical-align: -2px; }
     .tws-status-hospital { color: #ff7c7c; }
     .tws-status-okay { color: #7cfc7c; }
     .tws-respect { color: #7ec8e3; opacity: 0.9; }
@@ -10818,7 +10825,7 @@ const __twsOuter = (() => {
       ? parseCountryFlag(m.description)
       : '';
     const travelOn = featureOn('travelTimers') && m.state === 'Traveling' && !!travelDestOf(m.description);
-    const baseLabel = m.state === 'Hospital' ? `Hospital ${fmtDuration(m.remaining)}` : ((travelOn && travelLabel(m)) || m.state);
+    const baseLabel = m.state === 'Hospital' ? `${featureOn('hospIcon') ? HOSP_ICON : 'Hospital'} ${fmtDuration(m.remaining)}` : ((travelOn && travelLabel(m)) || m.state);
     return flag ? `${flag} ${baseLabel}` : baseLabel;
   }
 
@@ -10881,6 +10888,48 @@ const __twsOuter = (() => {
     const lighter = perfMode() === 'full' ? 'Balanced or Lite' : perfMode() === 'balanced' ? 'Lite' : '';
     showToast(`\ud83d\udc22 This page is struggling to keep up. ${lighter ? `Try ${lighter} mode (\u2699 Advanced) and ` : ''}close other scripts you don\u2019t need right now.`, { warn: true, duration: 9000 });
   }
+  // Names that don't fit (cut off with ...) scroll like a ticker: still for 3s, slide out to the left,
+  // come back in from the right, stop, repeat. Each element is measured once (new ones appear after a
+  // redraw); the animation phase follows the clock, so a redraw doesn't restart it.
+  const MQ_HOLD = 3000; // ms still between loops
+  const MQ_SPEED = 40; // px per second
+  const MQ_SEL = '.tws-name, .tws-enemy-name, .tws-log-main > span:first-child';
+  function marqueeClear() {
+    if (!panel) return;
+    panel.querySelectorAll('[data-mqc]').forEach((el) => {
+      delete el.dataset.mqc;
+      el.classList.remove('tws-mq');
+      if (el._twsMq) { try { el._twsMq.cancel(); } catch (e) { /* ignore */ } el._twsMq = null; }
+    });
+  }
+  function marqueeScan() {
+    if (!panel || showSettings || getCfg(STORE_KEYS.collapsed, false) || document.visibilityState === 'hidden') return;
+    if (!featureOn('scrollText')) { if (panel.querySelector('[data-mqc]')) marqueeClear(); return; }
+    const found = [];
+    panel.querySelectorAll(MQ_SEL).forEach((el) => {
+      if (el.dataset.mqc || !el.clientWidth) return;
+      found.push([el, el.scrollWidth, el.clientWidth]);
+    });
+    const t = Date.now();
+    found.forEach(([el, sw, cw]) => {
+      el.dataset.mqc = '1';
+      if (sw - cw <= 3 || typeof el.animate !== 'function') return;
+      const out = sw + 6, back = cw; // px: slide out to the left, then in from the right
+      const move = ((out + back) / MQ_SPEED) * 1000;
+      const dur = MQ_HOLD + move;
+      const h = MQ_HOLD / dur, a = h + (out / MQ_SPEED * 1000) / dur;
+      el.classList.add('tws-mq');
+      el._twsMq = el.animate([
+        { textIndent: '0px', offset: 0 },
+        { textIndent: '0px', offset: h },
+        { textIndent: `-${out}px`, offset: a },
+        { textIndent: `${back}px`, offset: Math.min(a + 0.0001, 0.9999) },
+        { textIndent: '0px', offset: 1 },
+      ], { duration: dur, iterations: Infinity, easing: 'linear' });
+      el._twsMq.currentTime = t % dur;
+    });
+  }
+  window.addEventListener('resize', () => { try { marqueeClear(); } catch (e) { /* ignore */ } });
   function updateInPlace__raw() {
     if (!panel || showSettings || getCfg(STORE_KEYS.collapsed, false)) return;
     const byId = {};
