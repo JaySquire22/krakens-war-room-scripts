@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dibs Caller ✋
 // @namespace    jay-glory-dibs
-// @version      0.4.8
+// @version      0.4.9
 // @description  Call buttons for Glory Command Dibs on the war page, enemy faction pages and enemy profiles. By -TheKraken- [3616083].
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/factions.php*
@@ -24,7 +24,7 @@
   "use strict";
   if (window.top !== window.self) return;
   var API = "https://dashing-fish-54.eu-west-1.convex.site/chain/api";
-  var VER = "0.4.8";
+  var VER = "0.4.9";
   // Only one copy may run. Script managers keep each install in its own sandbox (window flags aren't shared),
   // so the mark goes on the page itself. Two copies would fight over the member list (one sorts, the other unsorts).
   function dupWarn(other) {
@@ -140,6 +140,21 @@
     var theirs = placeOf(t[1], t[5]);
     return theirs !== "abroad" && theirs === mine;
   }
+  // where a target will be once out, or where you are (flying: where you land): "torn", "c<n>" (a country), or null
+  function callPlace(state, desc) {
+    state = String(state || ""); desc = String(desc || "");
+    var c = null; for (var i = 0; i < FLAGS.length; i++) if (FLAGS[i][0].test(desc)) { c = "c" + i; break; }
+    if (state === "Traveling") return /returning to torn/i.test(desc) ? "torn" : c;
+    if (state === "Abroad") return c;
+    if (state === "Hospital" || state === "Jail") return c || "torn";
+    return state === "Okay" ? "torn" : null;
+  }
+  // you can only call someone you'll be able to hit (the server checks this too)
+  function awayFrom(t) {
+    var me = S.st && S.st.me; if (!me) return false;
+    var a = callPlace(me[0], me[1]), b = callPlace(t[1], t[5]);
+    return !!(a && b && a !== b);
+  }
   function atkBtn(id) { return '<a class="gdb-btn gdb-atk" href="https://www.torn.com/loader.php?sid=attack&user2ID=' + id + '">ATK</a>'; }
   function parts(id) {
     var st = S.st, t = st.targets && st.targets[String(id)];
@@ -159,6 +174,7 @@
     else if (d) act = '<span class="gdb-taken">\u270b ' + esc(d.byName) + (d.myMs ? ' <i>+' + ((d.myMs - d.ms) / 1000).toFixed(2) + "s</i>" : "") + "</span>";
     else if (left == null) act = atk ? atkBtn(id) : "";
     else if (left <= LATE) act = '<button class="gdb-btn gdb-off" disabled>Late</button>';
+    else if (awayFrom(t)) act = '<button class="gdb-btn gdb-off gdb-away" data-gdb-away="' + id + '">Away</button>';
     else if (left > from) act = '<button class="gdb-btn gdb-off" disabled>Call</button>';
     else act = '<button class="gdb-btn" data-gdb-call="' + id + '">Call</button>';
     return { tm: tm, cls: cls, act: act };
@@ -403,6 +419,16 @@
     if (!b || b.disabled) return;
     e.preventDefault(); e.stopPropagation();
     call(b.getAttribute("data-gdb-call"));
+  }, true);
+  // Away: where you'd need to be
+  document.addEventListener("click", function (e) {
+    var b = e.target.closest && e.target.closest("[data-gdb-away]");
+    if (!b) return;
+    e.preventDefault(); e.stopPropagation();
+    var t = S.st && S.st.targets && S.st.targets[b.getAttribute("data-gdb-away")];
+    var NAMES = ["Mexico", "the Cayman Islands", "Canada", "Hawaii", "the UK", "Argentina", "Switzerland", "Japan", "China", "the UAE", "South Africa"];
+    var pl = t ? callPlace(t[1], t[5]) : null, where = pl === "torn" ? "Torn" : pl ? NAMES[Number(pl.slice(1))] : "";
+    toast("\u2716 You can only call someone you'll be able to hit: they'll be in " + (where || "another place") + " once they're out.", "warn");
   }, true);
   // the C on someone else's call: who called them, and when
   document.addEventListener("click", function (e) {
@@ -736,7 +762,7 @@
     ".gdb-pcell .gdb-btn:not(.gdb-off){background:linear-gradient(#5fa84a,#2f6a22);border-color:#1f4a16}",
     ".gdb-pcell .gdb-btn.gdb-off{color:#aaa}",
     ".gdb-btn{border:0;border-radius:4px;padding:3px 8px;font:bold 11px Arial,sans-serif;background:#2dd4bf;color:#04201c;cursor:pointer;touch-action:manipulation;-webkit-user-select:none;user-select:none;text-decoration:none;display:inline-block}",
-    ".gdb-btn.gdb-off{background:#3a3a3a;color:#888;cursor:default}",
+    ".gdb-btn.gdb-off{background:#3a3a3a;color:#888;cursor:default}.gdb-btn.gdb-away{cursor:pointer}",
     ".gdb-btn.gdb-un{background:#444;color:#eee}",
     ".gdb-btn.gdb-atk{background:#2e7d32;color:#fff}",
     ".gdb-tm{color:#ff7c7c;font-variant-numeric:tabular-nums;white-space:nowrap}",
