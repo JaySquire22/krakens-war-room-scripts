@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Glory War Room ⚔️
 // @namespace    jay-glory-war-room
-// @version      1.99.68
+// @version      1.99.69
 // @downloadURL  https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/glory-war-room.user.js
 // @updateURL    https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/glory-war-room.user.js
 // @description  [Glory factions only] Enemy hospital timers, quick attack links, and a chain timeout alert overlay for Torn faction war pages. Works in Tampermonkey (Firefox) and Torn PDA.
@@ -582,7 +582,7 @@ const __twsOuter = (() => {
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.68';
+  const SCRIPT_VERSION = '1.99.69';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -8265,7 +8265,8 @@ const __twsOuter = (() => {
     const key = String(id);
     const m = enemyMembers.concat(homeMembers).find((x) => String(x.id) === key);
     const name = m ? m.name : `Player ${key}`;
-    const total = typeof respectMap[key] === 'number' ? respectMap[key] : 0;
+    const total = adjResp(key);
+    const rawTotal = typeof respectMap[key] === 'number' ? respectMap[key] : 0;
     const det = (warScoreCache && warScoreCache.detail) ? warScoreCache.detail[key] : null;
     const r2 = (v) => v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     let body;
@@ -8287,7 +8288,7 @@ const __twsOuter = (() => {
         ${det.b.length ? `<div class="tws-rc-sec"><b>\ud83d\udd17 Chain bonus hits</b>
           <table><tr><th>Hit</th><th>Respect</th><th>Bonus</th><th>TCT</th></tr>${rows}</table>
           <div class="tws-rc-dim" style="margin-top:4px;">Bonus = that hit\u2019s respect minus their average hit. Bonus total: <b style="color:#fff;">${r2(bonusTotal)}</b></div>
-          <div class="tws-rc-dim">Respect without bonuses (bonus hits counted as average hits): <b style="color:#fff;">${r2(det.sum + avg * det.b.length)}</b></div></div>` : ''}`;
+          <div class="tws-rc-dim">Respect shown counts each bonus hit as an average hit. Including the bonuses it would be <b style="color:#fff;">${r2(rawTotal)}</b>.</div></div>` : ''}`;
     }
     box.innerHTML = `<div class="tws-rc"><div class="tws-rc-head"><b>${escHtml(name)} \u00b7 ${r2(total)}R</b><span class="tws-rc-x" data-rc="close">\u00d7</span></div>${body}</div>`;
   }
@@ -8570,6 +8571,17 @@ const __twsOuter = (() => {
   let respectError = null;
   let respectLoading = false;
   let respectFetchedAt = 0;
+  let respectWarKey = ''; // which war's attack history goes with the figures (for the chain bonus adjustment)
+  // Respect with each chain bonus hit (10th, 25th, 50th ... hit) counted as one of that player's average hits instead.
+  // Needs the war's attack history, so the recent-attacks-only figures are left as they are.
+  function adjResp(id) {
+    const raw = typeof respectMap[id] === 'number' ? respectMap[id] : 0;
+    if (respectSource === 'live' || !warScoreCache || warScoreCache.key !== respectWarKey || !warScoreCache.detail) return raw;
+    const det = warScoreCache.detail[String(id)];
+    if (!det || !det.b.length) return raw;
+    const avg = det.n ? det.sum / det.n : 0;
+    return Math.max(0, raw - det.b.reduce((t, x) => t + x[1], 0) + avg * det.b.length);
+  }
   let respectSource = 'live'; // 'report' (Torn's official war report) or 'live' (recent attacks only)
   let respectNotice = null;
   const warReportCache = {}; // warId -> { scores, names, winnerId }
@@ -8964,6 +8976,7 @@ const __twsOuter = (() => {
         }
         respectMap = rep.scores;
         respectSource = 'report';
+        respectWarKey = `r3-${lw.ownId}-${lw.enemyId}-${lw.startTime}-${lw.endTime || 0}`;
         if (lw.startTime && !warCheckStarted[lw.warId]) {
           warCheckStarted[lw.warId] = true;
           checkLiveMethod(lw, rep); // background self-check of the live method
@@ -8989,6 +9002,7 @@ const __twsOuter = (() => {
       try {
         respectMap = await buildWarScores(ownId, enemyFactionId, liveWar.startTime, 0);
         respectSource = 'calc';
+        respectWarKey = `r3-${ownId}-${enemyFactionId}-${liveWar.startTime}-0`;
         return;
       } catch (e) {
         respectNotice = `Full attack history not available (${e.message}); showing recent attacks only.`;
@@ -11985,7 +11999,7 @@ const __twsOuter = (() => {
       });
     } else if (isRespectView) {
       // Members with no recorded hits count as 0 respect.
-      sorted = filtered.sort(byNumericField((m) => (typeof respectMap[m.id] === 'number' ? respectMap[m.id] : 0)));
+      sorted = filtered.sort(byNumericField((m) => adjResp(m.id)));
     } else {
       // Timer sort (v1.80.2):
       //   TOP section: members in Torn -- Okay, plus hospital/jail in Torn.
@@ -12058,7 +12072,7 @@ const __twsOuter = (() => {
         : '';
       const ffNum = (themeId === 'ff' && ffVal !== null) ? ` <span class="tws-ffval">FF ${ffVal.toFixed(2)}</span>` : '';
       const statsHtml = (featureOn('ffStats') && m.ff) ? ` <small class="tws-est${ffCol ? ' tws-est-ff' : ''}"${estStyle}>${estHtml(m.ff)}${ffNum}</small>` : '';
-      const respectVal = typeof respectMap[m.id] === 'number' ? respectMap[m.id] : 0;
+      const respectVal = adjResp(m.id);
       const respectHtml = isRespectView
         ? ` <small class="tws-respect" data-resp-id="${m.id}" style="cursor:pointer;">${respectSource !== 'live' ? respectVal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : Math.round(respectVal).toLocaleString()}R</small>`
         : '';
