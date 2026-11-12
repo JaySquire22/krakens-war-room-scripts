@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Sandbox War Room 🧪
 // @namespace    jay-torn-war-script-sandbox
-// @version      1.99.66
+// @version      1.99.67
 // @downloadURL  https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @updateURL    https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @description  [SANDBOX - test build, not for general use] Enemy hospital timers, quick attack links, and a chain timeout alert overlay for Torn faction war pages. Works in Tampermonkey (Firefox) and Torn PDA.
@@ -582,7 +582,7 @@ const __twsOuter = (() => {
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.66';
+  const SCRIPT_VERSION = '1.99.67';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -6429,8 +6429,8 @@ const __twsOuter = (() => {
   // "vs <enemy>" name until it expires). Re-applied on every render.
   let headerFlash = null; // { text, cls, until }
   // Red circle with a white cross, used in the health / hospital banner.
-  // Red cross shown instead of the word Hospital on hospital timers (no background)
-  const HOSP_ICON = '<svg class="tws-hosp-ico" viewBox="0 0 18 18" width="13" height="13" aria-label="Hospital" role="img"><rect x="6" y="0" width="6" height="18" fill="#ff1a1a"/><rect x="0" y="6" width="18" height="6" fill="#ff1a1a"/></svg>';
+  // Red cross on a white rounded square with a dark outline, shown instead of the word Hospital on hospital timers
+  const HOSP_ICON = '<svg class="tws-hosp-ico" viewBox="0 0 20 20" width="15" height="15" aria-label="Hospital" role="img"><rect x="0.75" y="0.75" width="18.5" height="18.5" rx="4" ry="4" fill="#fff" stroke="#333" stroke-width="1.5"/><rect x="8.1" y="3.25" width="3.8" height="13.5" fill="#ff0000"/><rect x="3.25" y="8.1" width="13.5" height="3.8" fill="#ff0000"/></svg>';
   const MED_ICON = '<svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><rect x="0" y="0" width="20" height="20" rx="5" ry="5" fill="#fff"/><circle cx="10" cy="10" r="7.5" fill="#e02424"/><rect x="8.7" y="5.5" width="2.6" height="9" fill="#fff"/><rect x="5.5" y="8.7" width="9" height="2.6" fill="#fff"/></svg>';
 
   // ---------------------------------------------------------------------
@@ -9521,7 +9521,7 @@ const __twsOuter = (() => {
     .tws-copy-icon { cursor: pointer; color: #6ab0de; font-size: 13px; }
     .tws-bounty-icon { cursor: pointer; font-size: 12px; border-radius: 4px; padding: 0 2px; text-decoration: none; filter: grayscale(1) brightness(0.7); }
     .tws-time { min-width: 60px; text-align: right; margin-right: 6px; white-space: nowrap; }
-    .tws-hosp-ico { vertical-align: -1px; }
+    .tws-hosp-ico { vertical-align: -2px; }
     .tws-status-hospital { color: #ff7c7c; }
     .tws-status-okay { color: #7cfc7c; }
     .tws-respect { color: #7ec8e3; opacity: 0.9; }
