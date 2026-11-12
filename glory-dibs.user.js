@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dibs Caller ✋
 // @namespace    jay-glory-dibs
-// @version      0.4.7
+// @version      0.4.8
 // @description  Call buttons for Glory Command Dibs on the war page, enemy faction pages and enemy profiles. By -TheKraken- [3616083].
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/factions.php*
@@ -24,7 +24,7 @@
   "use strict";
   if (window.top !== window.self) return;
   var API = "https://dashing-fish-54.eu-west-1.convex.site/chain/api";
-  var VER = "0.4.7";
+  var VER = "0.4.8";
   // Only one copy may run. Script managers keep each install in its own sandbox (window flags aren't shared),
   // so the mark goes on the page itself. Two copies would fight over the member list (one sorts, the other unsorts).
   function dupWarn(other) {
@@ -151,7 +151,11 @@
     var tm = left == null || get("timers") === "0" ? "" : fly ? (fg ? fg + " " : "") + (left <= 0 ? "landing" : dur(left)) + " \u2708" : "\ud83c\udfe5 " + dur(left);
     var cls = "gdb-tm" + (fly ? " gdb-fly" : "") + (left != null && left <= from && left > LATE ? " gdb-open" : "");
     var act, atk = canAttack(t);
+    // someone else's call on a target who's out and showing Online: open to anyone, so a tappable C (who called
+    // them) and ATK, for the 3 minutes after they came out
+    var openCall = d && d.by !== ME.pid && t[3] === "on" && left == null && d.outAt && nowS() - d.outAt <= (st.holdSec || 180);
     if (d && d.by === ME.pid) act = atk ? atkBtn(id) : '<span class="gdb-yours">\u2705 Yours</span>';
+    else if (openCall) act = '<span class="gdb-cb" data-gdb-cb="' + id + '" title="Called by ' + esc(d.byName) + '">C</span>' + (atk ? atkBtn(id) : "");
     else if (d) act = '<span class="gdb-taken">\u270b ' + esc(d.byName) + (d.myMs ? ' <i>+' + ((d.myMs - d.ms) / 1000).toFixed(2) + "s</i>" : "") + "</span>";
     else if (left == null) act = atk ? atkBtn(id) : "";
     else if (left <= LATE) act = '<button class="gdb-btn gdb-off" disabled>Late</button>';
@@ -399,6 +403,15 @@
     if (!b || b.disabled) return;
     e.preventDefault(); e.stopPropagation();
     call(b.getAttribute("data-gdb-call"));
+  }, true);
+  // the C on someone else's call: who called them, and when
+  document.addEventListener("click", function (e) {
+    var cb = e.target.closest && e.target.closest("[data-gdb-cb]");
+    if (!cb) return;
+    e.preventDefault(); e.stopPropagation();
+    var id = Number(cb.getAttribute("data-gdb-cb")), st = S.st, d = st && (st.dibs || []).filter(function (x) { return x.t === id; })[0];
+    var t = st && st.targets && st.targets[String(id)];
+    if (d) toast("\u270b " + (t ? t[0] + " was" : "Called") + " called by " + d.byName + " at " + tms(d.ms) + " TCT" + leftTxt(d.leftMs) + ". They're Online, so anyone can hit them.", "ok");
   }, true);
   document.addEventListener("click", function (e) {
     var c = e.target.closest && e.target.closest("[data-gdb-call]");
@@ -732,6 +745,7 @@
     ".gdb-tm.gdb-open{font-weight:bold}",
     ".gdb-taken{color:#ff8a8a;white-space:nowrap}.gdb-taken i{color:#aaa;font-style:normal}",
     ".gdb-yours{color:#7cfc7c}",
+    ".gdb-cb{display:inline-block;cursor:pointer;background:#b8860b;color:#111;font:bold 11px Arial,sans-serif;line-height:16px;padding:0 5px;border-radius:3px;margin-right:4px}",
     "#gdb-called{position:fixed;left:8px;right:8px;bottom:8px;z-index:99998;display:flex;align-items:center;gap:6px;padding:7px 9px;border:1px solid #22c55e;border-radius:8px;background:#0f2a1c;color:#d1fae5;font:12px Arial,sans-serif;box-shadow:0 4px 14px rgba(0,0,0,.5)}",
     "#gdb-called .gdb-ct{flex:1}#gdb-called small{color:#9ad9b5}#gdb-called .gdb-btn{font-size:13px;padding:7px 12px}",
     "#gdb-called.gdb-inbar{position:static;left:auto;right:auto;bottom:auto;z-index:auto;margin:0;border-radius:0;border-width:1px 0 0;box-shadow:none}",
