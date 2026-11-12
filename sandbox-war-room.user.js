@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Sandbox War Room 🧪
 // @namespace    jay-torn-war-script-sandbox
-// @version      1.99.63
+// @version      1.99.64
 // @downloadURL  https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @updateURL    https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @description  [SANDBOX - test build, not for general use] Enemy hospital timers, quick attack links, and a chain timeout alert overlay for Torn faction war pages. Works in Tampermonkey (Firefox) and Torn PDA.
@@ -582,7 +582,7 @@ const __twsOuter = (() => {
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.63';
+  const SCRIPT_VERSION = '1.99.64';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -766,6 +766,7 @@ const __twsOuter = (() => {
 
     // --- Roster display ---
     { key: 'nameColors', group: 'Roster display', label: 'Colour names by online status' },
+    { key: 'scrollText', group: 'Roster display', label: '\u2194 Scroll names that don\u2019t fit', hint: 'On narrow screens, names cut off with \u2026 slowly slide across to show the rest, then slide back.' },
     { key: 'onlineFlash', group: 'Roster display', label: 'Flash names that are online and attackable' },
     { key: 'travelFlags', group: 'Roster display', label: 'Country flags: travelling, abroad, or in an overseas hospital', hint: 'Shown next to the status / hospital timer.' },
     { key: 'travelTimers', group: 'Roster display', label: '✈ Estimated landing timers for travellers', hint: 'Assumes Airstrip unless the player\u2019s usual method has been learned from a past flight. Tap a travel timer to see every method, and tap a method to make it that member\u2019s default.' },
@@ -852,7 +853,7 @@ const __twsOuter = (() => {
   const COMPLIANCE_OFF = new Set(['bloodQuickUse', 'bloodPreload', 'tempPreload']);
   // Analytics only ever exists in the Sandbox build.
   const IS_SBX_BUILD = 'Sandbox War Room'.indexOf('Sandbox') === 0; // false in the Krakens War Room build
-  const SANDBOX_ONLY = 'Sandbox War Room'.indexOf('Sandbox') === 0 ? new Set() : new Set(['perfMonitor', 'activityHistory', 'chatCalls', 'dibs']); // activityHistory: Sandbox-only until tested; chatCalls: kept for a Glory build
+  const SANDBOX_ONLY = 'Sandbox War Room'.indexOf('Sandbox') === 0 ? new Set() : new Set(['perfMonitor', 'activityHistory', 'chatCalls', 'dibs', 'scrollText']); // activityHistory: Sandbox-only until tested; chatCalls: kept for a Glory build
   function featureOn(key) {
     if (COMPLIANCE_OFF.has(key) || SANDBOX_ONLY.has(key)) return false;
     const f = FEATURE_MAP[key];
@@ -9292,6 +9293,7 @@ const __twsOuter = (() => {
     // Redrawing everything each second made the page, and other scripts watching it, lag.
     if (freedNow || perfTickCount % 15 === 0) safeRender(); else updateInPlace();
     try { lagTick(); } catch (e) { /* ignore */ }
+    try { marqueeScan(); } catch (e) { /* ignore */ }
     if (wideActive() && perfTickCount % 5 === 0) renderAtkLog();
   }
 
@@ -9488,6 +9490,8 @@ const __twsOuter = (() => {
     .tws-name.tws-copied-flash { background: #1e4620; border-radius: 4px; }
     .tws-name.tws-copy-failed-flash { background: #4a1e1e; border-radius: 4px; }
     .tws-name-link { color: inherit; text-decoration: none; }
+    .tws-mq { text-overflow: clip !important; animation: tws-mq var(--tws-mq-d, 8s) ease-in-out infinite; }
+    @keyframes tws-mq { 0%, 20% { text-indent: 0; } 65%, 85% { text-indent: var(--tws-mq, 0); } 100% { text-indent: 0; } }
     .tws-name-link:active { text-decoration: underline; }
     .tws-name-online { color: #7cfc7c; }
     .tws-name-idle { color: #ffd27c; }
@@ -11168,6 +11172,38 @@ const __twsOuter = (() => {
     const lighter = perfMode() === 'full' ? 'Balanced or Lite' : perfMode() === 'balanced' ? 'Lite' : '';
     showToast(`\ud83d\udc22 This page is struggling to keep up. ${lighter ? `Try ${lighter} mode (\u2699 Advanced) and ` : ''}close other scripts you don\u2019t need right now.`, { warn: true, duration: 9000 });
   }
+  // Names that don't fit (cut off with ...) slowly slide across to show the rest, then back.
+  // Each element is measured once (new ones appear after a redraw); the animation phase follows the clock,
+  // so a redraw doesn't restart it.
+  const MQ_SEL = '.tws-name, .tws-enemy-name, .tws-log-main > span:first-child';
+  function marqueeClear() {
+    if (!panel) return;
+    panel.querySelectorAll('[data-mqc]').forEach((el) => {
+      delete el.dataset.mqc;
+      el.classList.remove('tws-mq');
+      ['--tws-mq', '--tws-mq-d', 'animation-delay'].forEach((k) => el.style.removeProperty(k));
+    });
+  }
+  function marqueeScan() {
+    if (!panel || showSettings || getCfg(STORE_KEYS.collapsed, false) || document.visibilityState === 'hidden') return;
+    if (!featureOn('scrollText')) { if (panel.querySelector('[data-mqc]')) marqueeClear(); return; }
+    const found = [];
+    panel.querySelectorAll(MQ_SEL).forEach((el) => {
+      if (el.dataset.mqc || !el.clientWidth) return;
+      found.push([el, el.scrollWidth - el.clientWidth]);
+    });
+    const t = Date.now() / 1000;
+    found.forEach(([el, ov]) => {
+      el.dataset.mqc = '1';
+      if (ov <= 3) return;
+      const d = Math.min(12, Math.max(6, 4 + ov / 20));
+      el.style.setProperty('--tws-mq', `-${ov + 4}px`);
+      el.style.setProperty('--tws-mq-d', `${d.toFixed(1)}s`);
+      el.style.animationDelay = `-${(t % d).toFixed(2)}s`;
+      el.classList.add('tws-mq');
+    });
+  }
+  window.addEventListener('resize', () => { try { marqueeClear(); } catch (e) { /* ignore */ } });
   function updateInPlace__raw() {
     if (!panel || showSettings || getCfg(STORE_KEYS.collapsed, false)) return;
     const byId = {};
