@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dibs Caller ✋
 // @namespace    jay-glory-dibs
-// @version      0.4.6
+// @version      0.4.7
 // @description  Call buttons for Glory Command Dibs on the war page, enemy faction pages and enemy profiles. By -TheKraken- [3616083].
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/factions.php*
@@ -24,7 +24,7 @@
   "use strict";
   if (window.top !== window.self) return;
   var API = "https://dashing-fish-54.eu-west-1.convex.site/chain/api";
-  var VER = "0.4.6";
+  var VER = "0.4.7";
   // Only one copy may run. Script managers keep each install in its own sandbox (window flags aren't shared),
   // so the mark goes on the page itself. Two copies would fight over the member list (one sorts, the other unsorts).
   function dupWarn(other) {
@@ -84,11 +84,24 @@
   function leftTxt(ms) { if (!ms) return ""; var t = ms / 1000, m = Math.floor(t / 60); return " (" + (m ? m + "m " : "") + (t - m * 60).toFixed(1) + "s left)"; }
   function timer(t, now) { if (t[1] === "Hospital" && t[2] > now) return t[2] - now; if (t[1] === "Traveling" && t[6]) return t[6] - now; return null; }
 
+  // how often to ask the server: every 10s (it only refreshes enemy statuses every 10s), every 5s while a
+  // callable timer is close or you hold a dib, and once a minute while Dibs is off
+  function pollGap() {
+    var st = S.st;
+    if (!st) return 10000;
+    if (!st.on) return 60000;
+    if ((st.dibs || []).some(function (d) { return d.by === ME.pid; })) return 5000;
+    var now = nowS(), T = st.targets || {}, from = st.callFrom || CALL_FROM;
+    for (var id in T) { var l = timer(T[id], now); if (l != null && l > LATE && l <= from + 45) return 5000; }
+    return 10000;
+  }
   function poll() {
-    if (!ME || document.hidden || S.inFlight || Date.now() < S.denied || Date.now() - S.last < 3000) return;
+    if (!ME || document.hidden || S.inFlight || Date.now() < S.denied || Date.now() - S.last < pollGap()) return;
     S.last = Date.now(); S.inFlight = true;
-    var q0 = Date.now();
-    api({ op: "dibsState" }).then(function (j) {
+    var q0 = Date.now(), prev = S.st;
+    // what we already have: the server sends the enemy list again only if it changed
+    api({ op: "dibsState", since: prev && prev.snapV ? prev.snapV : undefined }).then(function (j) {
+      if (j && j.same && prev) { j.targets = prev.targets; j.me = prev.me; }
       var q1 = Date.now(); S.inFlight = false;
       if (!j || j.error) {
         S.st = null; S.err = (j && j.error) || "No answer";
