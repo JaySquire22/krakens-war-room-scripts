@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Sandbox War Room 🧪
 // @namespace    jay-torn-war-script-sandbox
-// @version      1.99.65
+// @version      1.99.66
 // @downloadURL  https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @updateURL    https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @description  [SANDBOX - test build, not for general use] Enemy hospital timers, quick attack links, and a chain timeout alert overlay for Torn faction war pages. Works in Tampermonkey (Firefox) and Torn PDA.
@@ -582,7 +582,7 @@ const __twsOuter = (() => {
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.65';
+  const SCRIPT_VERSION = '1.99.66';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -766,6 +766,7 @@ const __twsOuter = (() => {
 
     // --- Roster display ---
     { key: 'nameColors', group: 'Roster display', label: 'Colour names by online status' },
+    { key: 'hospIcon', group: 'Roster display', label: '\u271a Red cross instead of the word Hospital', hint: 'Hospital timers show a red cross and the time left, leaving more room for names.' },
     { key: 'scrollText', group: 'Roster display', label: '\u2194 Scroll names that don\u2019t fit', hint: 'On narrow screens, names cut off with \u2026 scroll round like a ticker, pausing for 3 seconds between loops.' },
     { key: 'onlineFlash', group: 'Roster display', label: 'Flash names that are online and attackable' },
     { key: 'travelFlags', group: 'Roster display', label: 'Country flags: travelling, abroad, or in an overseas hospital', hint: 'Shown next to the status / hospital timer.' },
@@ -853,7 +854,7 @@ const __twsOuter = (() => {
   const COMPLIANCE_OFF = new Set(['bloodQuickUse', 'bloodPreload', 'tempPreload']);
   // Analytics only ever exists in the Sandbox build.
   const IS_SBX_BUILD = 'Sandbox War Room'.indexOf('Sandbox') === 0; // false in the Krakens War Room build
-  const SANDBOX_ONLY = 'Sandbox War Room'.indexOf('Sandbox') === 0 ? new Set() : new Set(['perfMonitor', 'activityHistory', 'chatCalls', 'dibs', 'scrollText']); // activityHistory: Sandbox-only until tested; chatCalls: kept for a Glory build
+  const SANDBOX_ONLY = 'Sandbox War Room'.indexOf('Sandbox') === 0 ? new Set() : new Set(['perfMonitor', 'activityHistory', 'chatCalls', 'dibs', 'scrollText', 'hospIcon']); // activityHistory: Sandbox-only until tested; chatCalls: kept for a Glory build
   function featureOn(key) {
     if (COMPLIANCE_OFF.has(key) || SANDBOX_ONLY.has(key)) return false;
     const f = FEATURE_MAP[key];
@@ -6428,6 +6429,8 @@ const __twsOuter = (() => {
   // "vs <enemy>" name until it expires). Re-applied on every render.
   let headerFlash = null; // { text, cls, until }
   // Red circle with a white cross, used in the health / hospital banner.
+  // Red cross shown instead of the word Hospital on hospital timers (no background)
+  const HOSP_ICON = '<svg class="tws-hosp-ico" viewBox="0 0 18 18" width="13" height="13" aria-label="Hospital" role="img"><rect x="6" y="0" width="6" height="18" fill="#ff1a1a"/><rect x="0" y="6" width="18" height="6" fill="#ff1a1a"/></svg>';
   const MED_ICON = '<svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><rect x="0" y="0" width="20" height="20" rx="5" ry="5" fill="#fff"/><circle cx="10" cy="10" r="7.5" fill="#e02424"/><rect x="8.7" y="5.5" width="2.6" height="9" fill="#fff"/><rect x="5.5" y="8.7" width="9" height="2.6" fill="#fff"/></svg>';
 
   // ---------------------------------------------------------------------
@@ -9518,6 +9521,7 @@ const __twsOuter = (() => {
     .tws-copy-icon { cursor: pointer; color: #6ab0de; font-size: 13px; }
     .tws-bounty-icon { cursor: pointer; font-size: 12px; border-radius: 4px; padding: 0 2px; text-decoration: none; filter: grayscale(1) brightness(0.7); }
     .tws-time { min-width: 60px; text-align: right; margin-right: 6px; white-space: nowrap; }
+    .tws-hosp-ico { vertical-align: -1px; }
     .tws-status-hospital { color: #ff7c7c; }
     .tws-status-okay { color: #7cfc7c; }
     .tws-respect { color: #7ec8e3; opacity: 0.9; }
@@ -11108,7 +11112,7 @@ const __twsOuter = (() => {
       ? parseCountryFlag(m.description)
       : '';
     const travelOn = featureOn('travelTimers') && m.state === 'Traveling' && !!travelDestOf(m.description);
-    const baseLabel = m.state === 'Hospital' ? `Hospital ${fmtDuration(m.remaining)}` : ((travelOn && travelLabel(m)) || m.state);
+    const baseLabel = m.state === 'Hospital' ? `${featureOn('hospIcon') ? HOSP_ICON : 'Hospital'} ${fmtDuration(m.remaining)}` : ((travelOn && travelLabel(m)) || m.state);
     return flag ? `${flag} ${baseLabel}` : baseLabel;
   }
 
