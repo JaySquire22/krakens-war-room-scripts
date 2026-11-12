@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Dibs Caller ✋
 // @namespace    jay-glory-dibs
-// @version      0.5.0
+// @version      0.5.1
 // @description  Call buttons for Glory Command Dibs on the war page, enemy faction pages and enemy profiles. By -TheKraken- [3616083].
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/factions.php*
@@ -24,7 +24,7 @@
   "use strict";
   if (window.top !== window.self) return;
   var API = "https://dashing-fish-54.eu-west-1.convex.site/chain/api";
-  var VER = "0.5.0";
+  var VER = "0.5.1";
   // Only one copy may run. Script managers keep each install in its own sandbox (window flags aren't shared),
   // so the mark goes on the page itself. Two copies would fight over the member list (one sorts, the other unsorts).
   function dupWarn(other) {
@@ -155,7 +155,7 @@
     var a = callPlace(me[0], me[1]), b = callPlace(t[1], t[5]);
     return !!(a && b && a !== b);
   }
-  function atkBtn(id) { return '<a class="gdb-btn gdb-atk" href="https://www.torn.com/loader.php?sid=attack&user2ID=' + id + '">ATK</a>'; }
+  function atkBtn(id) { return '<a class="gdb-btn gdb-atk" href="https://www.torn.com/page.php?sid=attack&user2ID=' + id + '">ATK</a>'; }
   function parts(id) {
     var st = S.st, t = st.targets && st.targets[String(id)];
     if (!t) return null;
@@ -372,7 +372,7 @@
     var t = (S.st.targets && S.st.targets[String(d.t)]) || ["#" + d.t], now = nowS(), left = timer(t, now);
     var line = left != null ? (t[1] === "Traveling" ? "lands in ~" : "out in ") + dur(left) : d.outAt ? "hit within " + dur((S.st.holdSec || 180) - (now - d.outAt)) : "out now";
     var h = '<span class="gdb-ct">\u270b Called: <b>' + esc(t[0]) + "</b><br><small>" + line + " \u00b7 called " + tms(d.ms) + leftTxt(d.leftMs) + "</small></span>"
-      + '<a class="gdb-btn gdb-atk" href="https://www.torn.com/loader.php?sid=attack&user2ID=' + d.t + '">ATK</a><button class="gdb-btn gdb-un" data-gdb-rel="' + d.t + '">\u21a9 Uncall</button>';
+      + '<a class="gdb-btn gdb-atk" href="https://www.torn.com/page.php?sid=attack&user2ID=' + d.t + '">ATK</a><button class="gdb-btn gdb-un" data-gdb-rel="' + d.t + '">\u21a9 Uncall</button>';
     // slow flash while the target's showing Online (kept in step when it's redrawn)
     var onl = t[3] === "on";
     if (onl) h = h.replace("</b><br>", '</b> <span class="gdb-onltag">\ud83d\udfe2 Online</span><br>');
