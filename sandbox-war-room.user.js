@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Sandbox War Room 🧪
 // @namespace    jay-torn-war-script-sandbox
-// @version      1.99.62
+// @version      1.99.63
 // @downloadURL  https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @updateURL    https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @description  [SANDBOX - test build, not for general use] Enemy hospital timers, quick attack links, and a chain timeout alert overlay for Torn faction war pages. Works in Tampermonkey (Firefox) and Torn PDA.
@@ -582,7 +582,7 @@ const __twsOuter = (() => {
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.62';
+  const SCRIPT_VERSION = '1.99.63';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -5655,17 +5655,30 @@ const __twsOuter = (() => {
         return;
       }
       DIB.st = j;
+      dibTieNews(j);
       // the server's clock, to the millisecond (half the round trip each way)
       if (j.nowMs && (DIB.rtt == null || q1 - q0 <= DIB.rtt * 1.5)) { DIB.skew = j.nowMs - (q0 + q1) / 2; DIB.rtt = DIB.rtt == null ? q1 - q0 : Math.min(q1 - q0, DIB.rtt * 1.2); }
     }).catch(() => { DIB.inFlight = false; });
   }
   function dibNow() { return (Date.now() + DIB.skew) / 1000; }
+  // a same-millisecond tie decided by random draw: tell everyone involved, once
+  const dibTieSeen = {};
+  function dibTieNews(st) {
+    const me = dibOwnId();
+    (st.dibs || []).forEach((d) => {
+      if (!d.tie) return;
+      const k = `${d.t}:${d.by}:${d.tie}`; if (dibTieSeen[k]) return;
+      const t = st.targets && st.targets[String(d.t)], nm = t ? t[0] : '#' + d.t;
+      if (d.by === me) { dibTieSeen[k] = 1; showToast(`\ud83c\udfb2 ${nm} is yours by a random draw: someone called at the exact same millisecond (${dibTime(d.ms)} TCT).`, { ok: true, duration: 8000 }); }
+      else if (d.myMs && d.myMs === d.ms) { dibTieSeen[k] = 1; showToast(`\ud83c\udfb2 You and ${d.byName} called ${nm} at the exact same millisecond (${dibTime(d.ms)} TCT). A random draw gave it to ${d.byName}.`, { error: true, duration: 8000 }); }
+    });
+  }
   // where a target will be once out, or where you are (flying: where you land): 'torn', a country, or null
   const DIB_PLACES = [[/mexic/i, 'Mexico'], [/cayman/i, 'the Cayman Islands'], [/canad/i, 'Canada'], [/hawai/i, 'Hawaii'], [/united kingdom|british|\bUK\b|england|english/i, 'the UK'], [/argentin/i, 'Argentina'], [/switzerland|swiss/i, 'Switzerland'], [/japan/i, 'Japan'], [/china|chinese/i, 'China'], [/\bUAE\b|emirat|dubai/i, 'the UAE'], [/south africa/i, 'South Africa']];
   function dibPlace(state, desc) {
     state = String(state || ''); desc = String(desc || '');
     const c = (DIB_PLACES.find((p) => p[0].test(desc)) || [])[1] || null;
-    if (state === 'Traveling') return /returning to torn/i.test(desc) ? 'Torn' : c;
+    if (state === 'Traveling') return /\bto torn\b|^returning/i.test(desc) ? 'Torn' : c;
     if (state === 'Abroad') return c;
     if (state === 'Hospital' || state === 'Jail') return c || 'Torn';
     return state === 'Okay' ? 'Torn' : null;
@@ -5788,7 +5801,9 @@ const __twsOuter = (() => {
     DIB.busy = true;
     dibApi({ op: 'dibCall', target: Number(id) }).then((j) => {
       DIB.busy = false; DIB.lastPoll = 0;
-      if (j && j.ok) showToast(`\u2705 It\u2019s yours! Called ${dibTime(j.ms)} TCT${dibLeft(j.leftMs)}${j.online ? '. They\u2019re ONLINE: if still online when out, anyone can hit them.' : '.'}`, { ok: true });
+      if (j && j.ok && j.tie) { dibTieSeen[`${id}:${dibOwnId()}:${j.tie}`] = 1; showToast(`\ud83c\udfb2 It\u2019s yours by a random draw! You and ${j.tieWith} called at the exact same millisecond (${dibTime(j.ms)} TCT), so the server drew lots.`, { ok: true, duration: 8000 }); }
+      else if (j && j.why === 'taken' && j.tie) showToast(`\ud83c\udfb2 ${j.msg}`, { error: true, duration: 8000 });
+      else if (j && j.ok) showToast(`\u2705 It\u2019s yours! Called ${dibTime(j.ms)} TCT${dibLeft(j.leftMs)}${j.online ? '. They\u2019re ONLINE: if still online when out, anyone can hit them.' : '.'}`, { ok: true });
       else if (j && j.why === 'taken') showToast(`\u2716 Taken by ${j.byName}, called ${dibTime(j.winMs)}${dibLeft(j.winLeftMs)}. Yours registered ${dibTime(j.ms)}${j.ms > j.winMs ? ` (${((j.ms - j.winMs) / 1000).toFixed(3)}s too late)` : ''}.`, { error: true });
       else showToast(`\u2716 ${(j && (j.msg || j.error)) || 'Call failed'}${j && j.ms ? ` (registered ${dibTime(j.ms)})` : ''}`, { warn: true });
       dibTick();
@@ -9493,6 +9508,7 @@ const __twsOuter = (() => {
     .tws-star { cursor: pointer; color: #555; font-size: 13px; }
     .tws-call { display: inline-block; cursor: pointer; background: #b8860b; color: #111; font-weight: bold; font-size: 10px; line-height: 13px; padding: 0 4px; border-radius: 3px; margin-left: 3px; vertical-align: 1px; }
     .tws-star.tws-star-active { color: #ffd700; }
+    .tws-star.tws-star-front { margin-right: 4px; }
     .tws-star { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
     .tws-star[data-hold="1"] { transition: transform .5s linear, text-shadow .5s linear; display: inline-block; }
     .tws-star.tws-star-holding { transform: scale(1.45); text-shadow: 0 0 8px #ffd700; }
@@ -12184,6 +12200,15 @@ const __twsOuter = (() => {
         e.stopPropagation();
         openRespCard(el.dataset.respId);
       });
+    });
+    // a long name (or stats) can push the star off the end of the row, where it can't be tapped:
+    // only on those rows, the star moves in front of the name
+    body.querySelectorAll('.tws-name').forEach((nm) => {
+      const star = nm.querySelector('.tws-star');
+      if (!star || nm.scrollWidth <= nm.clientWidth + 1) return;
+      const link = nm.querySelector('.tws-name-link');
+      nm.insertBefore(star, link || nm.firstChild);
+      star.classList.add('tws-star-front');
     });
     body.querySelectorAll('.tws-star').forEach((el) => {
       const id = el.dataset.targetId;
