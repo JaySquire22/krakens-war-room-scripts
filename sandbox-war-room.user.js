@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Sandbox War Room 🧪
 // @namespace    jay-torn-war-script-sandbox
-// @version      1.99.59
+// @version      1.99.60
 // @downloadURL  https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @updateURL    https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @description  [SANDBOX - test build, not for general use] Enemy hospital timers, quick attack links, and a chain timeout alert overlay for Torn faction war pages. Works in Tampermonkey (Firefox) and Torn PDA.
@@ -582,7 +582,7 @@ const __twsOuter = (() => {
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.59';
+  const SCRIPT_VERSION = '1.99.60';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -5641,12 +5641,14 @@ const __twsOuter = (() => {
   }
   function dibPoll() {
     if (!featureOn('dibs') || document.hidden || !enemyFactionId || Date.now() < DIB.deniedUntil) return;
-    if (DIB.inFlight || Date.now() - DIB.lastPoll < 3000) return;
+    if (DIB.inFlight || Date.now() - DIB.lastPoll < dibPollGap()) return;
     DIB.lastPoll = Date.now(); DIB.inFlight = true;
-    const q0 = Date.now();
-    dibApi({ op: 'dibsState' }).then((j) => {
+    const q0 = Date.now(), prev = DIB.st;
+    // what we already have: the server sends the enemy list again only if it changed
+    dibApi({ op: 'dibsState', since: prev && prev.snapV ? prev.snapV : undefined }).then((j) => {
       const q1 = Date.now();
       DIB.inFlight = false;
+      if (j && j.same && prev) { j.targets = prev.targets; j.me = prev.me; }
       if (!j || j.error) {
         if (j && j.needAuth) { getPass(true); return; }
         DIB.st = null; DIB.deniedUntil = Date.now() + 10 * 60 * 1000; // not in the trial (or not a Glory faction): check again in 10 min
@@ -5658,6 +5660,18 @@ const __twsOuter = (() => {
     }).catch(() => { DIB.inFlight = false; });
   }
   function dibNow() { return (Date.now() + DIB.skew) / 1000; }
+  // every 10s (the server refreshes enemy statuses every 10s), every 5s while a callable timer is close or
+  // you hold a dib, once a minute while Dibs is off or against another faction
+  function dibPollGap() {
+    const st = DIB.st;
+    if (!st) return 10000;
+    if (!st.on || Number(st.enemyF) !== Number(enemyFactionId)) return 60000;
+    const me = dibOwnId();
+    if ((st.dibs || []).some((d) => d.by === me)) return 5000;
+    const now = dibNow(), T = st.targets || {}, from = st.callFrom || 359;
+    for (const id in T) { const l = dibTimer(T[id], now); if (l != null && l > 15 && l <= from + 45) return 5000; }
+    return 10000;
+  }
   function dibTime(ms) { return new Date(ms).toISOString().slice(11, 23); }
   function dibLeft(ms) { if (!ms) return ''; const t = ms / 1000; const m = Math.floor(t / 60); return ` (${m ? m + 'm ' : ''}${(t - m * 60).toFixed(1)}s left)`; }
   function dibTimer(t, now) {
