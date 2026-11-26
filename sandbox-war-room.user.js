@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Sandbox War Room 🧪
 // @namespace    jay-torn-war-script-sandbox
-// @version      1.99.70
+// @version      1.99.71
 // @downloadURL  https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @updateURL    https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @description  [SANDBOX - test build, not for general use] Enemy hospital timers, quick attack links, and a chain timeout alert overlay for Torn faction war pages. Works in Tampermonkey (Firefox) and Torn PDA.
@@ -582,7 +582,7 @@ const __twsOuter = (() => {
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.70';
+  const SCRIPT_VERSION = '1.99.71';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -8667,7 +8667,18 @@ const __twsOuter = (() => {
     
     // Render (destroys and recreates HTML)
     render();
-    
+
+    // Put the lists back where they were straight away, before the screen updates, so a redraw
+    // (every 15s, or when someone comes out) never flashes the list back to the top mid-scroll.
+    // The frame below sets them again once the heights have been recalculated.
+    try {
+      const r0 = document.querySelector('#tws-roster');
+      if (r0 && savedRosterScroll > 0) r0.scrollTop = savedRosterScroll;
+      const s0 = document.querySelector('#tws-settings');
+      if (s0 && savedSettingsScroll > 0) s0.scrollTop = savedSettingsScroll;
+      ['#tws-body-home', '#tws-body-target'].forEach((c) => { const r = document.querySelector(`${c} #tws-roster`); if (r && savedColScroll[c] > 0) r.scrollTop = savedColScroll[c]; });
+    } catch (e) { /* ignore */ }
+
     // Restore scroll position and recalculate heights after render
     requestAnimationFrame(() => {
       const body = document.querySelector('#tws-body');
