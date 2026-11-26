@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Sandbox War Room 🧪
 // @namespace    jay-torn-war-script-sandbox
-// @version      1.99.71
+// @version      1.99.72
 // @downloadURL  https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @updateURL    https://raw.githubusercontent.com/JaySquire22/krakens-war-room-scripts/main/sandbox-war-room.user.js
 // @description  [SANDBOX - test build, not for general use] Enemy hospital timers, quick attack links, and a chain timeout alert overlay for Torn faction war pages. Works in Tampermonkey (Firefox) and Torn PDA.
@@ -582,7 +582,7 @@ const __twsOuter = (() => {
   }, 2000);
 
 
-  const SCRIPT_VERSION = '1.99.71';
+  const SCRIPT_VERSION = '1.99.72';
 
   // ---------------------------------------------------------------------
   // PLATFORM DETECTION
@@ -8211,7 +8211,7 @@ const __twsOuter = (() => {
     const st = document.createElement('style');
     st.id = 'tws-sc-css';
     st.textContent = `
-      #tws-statcard{position:fixed;inset:0;z-index:1000002;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:12px;box-sizing:border-box;}
+      #tws-statcard{position:fixed;inset:0;z-index:2147481102;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:12px;box-sizing:border-box;}
       #tws-statcard .tws-sc-card{width:min(360px,100%);max-height:88vh;overflow:auto;background:#1b1426;color:#ddd;border:1px solid #6b3fa0;border-radius:10px;padding:10px 12px;font:13px/1.4 Arial,sans-serif;box-shadow:0 4px 18px rgba(0,0,0,.6);}
       #tws-statcard .tws-sc-head{display:flex;justify-content:space-between;gap:8px;margin-bottom:6px;color:#fff;}
       #tws-statcard .tws-sc-x{cursor:pointer;font-size:20px;line-height:1;color:#aaa;padding:0 4px;}
@@ -8247,7 +8247,7 @@ const __twsOuter = (() => {
     if (!document.getElementById('tws-resp-css')) {
       const st = document.createElement('style');
       st.id = 'tws-resp-css';
-      st.textContent = '#tws-respcard{position:fixed;inset:0;z-index:1000002;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:12px;box-sizing:border-box;}'
+      st.textContent = '#tws-respcard{position:fixed;inset:0;z-index:2147481102;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:12px;box-sizing:border-box;}'
         + '#tws-respcard .tws-rc{width:min(340px,100%);max-height:88vh;overflow:auto;background:#1b1426;color:#ddd;border:1px solid #6b3fa0;border-radius:10px;padding:10px 12px;font:13px/1.4 Arial,sans-serif;box-shadow:0 4px 18px rgba(0,0,0,.6);}'
         + '#tws-respcard .tws-rc-head{display:flex;justify-content:space-between;gap:8px;margin-bottom:6px;color:#fff;}'
         + '#tws-respcard .tws-rc-x{cursor:pointer;font-size:20px;line-height:1;color:#aaa;padding:0 4px;}'
@@ -9357,7 +9357,7 @@ const __twsOuter = (() => {
       border-radius: 8px;
       font-family: Arial, sans-serif;
       font-size: 12px;
-      z-index: 99999;
+      z-index: 2147480000; /* above the page and anything else running; War Room's own pop-ups sit above it */
       box-shadow: 0 4px 12px rgba(0,0,0,0.5);
     }
     #tws-header {
@@ -9966,7 +9966,7 @@ const __twsOuter = (() => {
       background: #111;
       border: 1px solid #555;
       border-radius: 8px;
-      z-index: 100001;
+      z-index: 2147481001;
       display: none;
       flex-direction: column;
       overflow: hidden;
@@ -10008,10 +10008,10 @@ const __twsOuter = (() => {
     #tws-welcome button { flex: 1; padding: 10px; border-radius: 6px; border: none; font: bold 14px Arial, sans-serif; color: #fff; cursor: pointer; }
     #tws-welcome #tws-wel-settings { background: #2e7d32; }
     #tws-welcome #tws-wel-ok { background: #3a4550; }
-    #tws-ew-tab { position: fixed; right: 0; top: 42%; z-index: 2147483100; display: none; align-items: center; justify-content: center; width: 22px; padding: 12px 0; background: #2a2a2a; border: 1px solid #555; border-right: none; border-radius: 8px 0 0 8px; color: #ddd; cursor: pointer; box-shadow: -2px 2px 6px rgba(0,0,0,.5); transition: right .25s; }
+    #tws-ew-tab { position: fixed; right: 0; top: 42%; z-index: 2147479950; display: none; align-items: center; justify-content: center; width: 22px; padding: 12px 0; background: #2a2a2a; border: 1px solid #555; border-right: none; border-radius: 8px 0 0 8px; color: #ddd; cursor: pointer; box-shadow: -2px 2px 6px rgba(0,0,0,.5); transition: right .25s; }
     #tws-ew-tab span { writing-mode: vertical-rl; transform: rotate(180deg); font: bold 11px Arial, sans-serif; letter-spacing: 2px; }
     #tws-ew-tab.tws-ew-tab-open { right: min(300px, 82vw); }
-    #tws-ew-drawer { position: fixed; top: 6vh; right: 0; z-index: 2147483100; width: min(300px, 82vw); max-height: 88vh; overflow-y: auto; background: #1e1e1e; border: 1px solid #555; border-right: none; border-radius: 8px 0 0 8px; box-shadow: -4px 0 12px rgba(0,0,0,.6); color: #ddd; font: 12px Arial, sans-serif; padding: 8px; box-sizing: border-box; transform: translateX(105%); transition: transform .25s; }
+    #tws-ew-drawer { position: fixed; top: 6vh; right: 0; z-index: 2147479950; width: min(300px, 82vw); max-height: 88vh; overflow-y: auto; background: #1e1e1e; border: 1px solid #555; border-right: none; border-radius: 8px 0 0 8px; box-shadow: -4px 0 12px rgba(0,0,0,.6); color: #ddd; font: 12px Arial, sans-serif; padding: 8px; box-sizing: border-box; transform: translateX(105%); transition: transform .25s; }
     #tws-ew-drawer.tws-ew-open { transform: translateX(0); }
     #tws-ew-drawer .tws-ew-head { display: flex; justify-content: space-between; align-items: center; font-size: 14px; margin-bottom: 2px; }
     #tws-ew-drawer .tws-ew-x { cursor: pointer; font-size: 20px; line-height: 1; padding: 0 4px; color: #aaa; }
@@ -10097,7 +10097,7 @@ const __twsOuter = (() => {
       border: 2px solid #2e7d32;
       border-radius: 10px;
       padding: 12px;
-      z-index: 100007;
+      z-index: 2147481007;
       color: #eee;
       font-family: Arial, sans-serif;
       font-size: 14px;
@@ -10128,7 +10128,7 @@ const __twsOuter = (() => {
       border: 1px solid #666;
       padding: 8px 12px;
       border-radius: 8px;
-      z-index: 100006;
+      z-index: 2147481006;
       font-size: 12px;
       display: none;
       max-width: 90vw;
@@ -10226,7 +10226,7 @@ const __twsOuter = (() => {
     #tws-ki-panel .tws-ki-item small { color: var(--default-color-light,#aaa); }
 
     .tws-ki-attack-avatar-host { position: relative !important; }
-    .tws-ki-enemy-weapons-layer { position: fixed; z-index: 2147483000; inset: 0; pointer-events: none; }
+    .tws-ki-enemy-weapons-layer { position: fixed; z-index: 2147479900; inset: 0; pointer-events: none; }
     .tws-ki-enemy-weapon-label {
       position: absolute;
       box-sizing: border-box;
@@ -10263,10 +10263,10 @@ const __twsOuter = (() => {
     .tws-ki-temp-host { position: relative !important; }
     .tws-ki-temp-bad { outline: 2px solid #ff4d4d !important; outline-offset: -2px; }
     .tws-ki-temp-warn { outline: 2px solid #ffb84d !important; outline-offset: -2px; }
-    .tws-ki-temp-tab { position: absolute; z-index: 2147482990; width: 22px; height: 26px; display: flex; align-items: center; justify-content: center; border-radius: 0 6px 6px 0; font: bold 13px Arial, sans-serif; color: #fff; cursor: pointer; box-shadow: 0 1px 4px rgba(0,0,0,.6); user-select: none; }
+    .tws-ki-temp-tab { position: absolute; z-index: 2147479990; width: 22px; height: 26px; display: flex; align-items: center; justify-content: center; border-radius: 0 6px 6px 0; font: bold 13px Arial, sans-serif; color: #fff; cursor: pointer; box-shadow: 0 1px 4px rgba(0,0,0,.6); user-select: none; }
     .tws-ki-temp-tab.is-block { background: #b3261e; border: 1px solid #ff6b6b; }
     .tws-ki-temp-tab.is-reduce { background: #9a6200; border: 1px solid #ffb84d; }
-    .tws-ki-temp-pop { position: absolute; z-index: 2147482995; max-width: min(300px, 78vw); padding: 5px 9px; border-radius: 6px; background: rgba(60, 12, 12, .94); border: 1px solid #ff4d4d; color: #ffd0d0; font: bold 11px/1.4 Arial, sans-serif; box-shadow: 0 3px 10px rgba(0,0,0,.6); }
+    .tws-ki-temp-pop { position: absolute; z-index: 2147479995; max-width: min(300px, 78vw); padding: 5px 9px; border-radius: 6px; background: rgba(60, 12, 12, .94); border: 1px solid #ff4d4d; color: #ffd0d0; font: bold 11px/1.4 Arial, sans-serif; box-shadow: 0 3px 10px rgba(0,0,0,.6); }
     .tws-ki-temp-pop-head { color: #ffcf4d; font-size: 11px; letter-spacing: .3px; }
     .tws-ki-temp-pop-reduce { color: #ffd98a; }
     .tws-ki-temp-pop-job { color: #ffe0b0; }
@@ -10284,7 +10284,7 @@ const __twsOuter = (() => {
     .tws-ki-temp-mark.is-reduce { background: rgba(140, 90, 0, 0.6); border: 2px solid #ffb84d; }
     #tws-ki-armour-box {
       position: fixed;
-      z-index: 100005;
+      z-index: 2147479005;
       display: none;
       max-width: 220px;
       border: 1px solid #177d8688;
@@ -10323,7 +10323,7 @@ const __twsOuter = (() => {
     .tws-travel-eta { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 2px; }
     #tws-travel-pop {
       position: fixed;
-      z-index: 100008;
+      z-index: 2147481008;
       display: none;
       width: 250px;
       max-width: 92vw;
@@ -10357,7 +10357,7 @@ const __twsOuter = (() => {
       border: 1px solid #666;
       padding: 6px 10px;
       border-radius: 8px;
-      z-index: 100006;
+      z-index: 2147479006;
       font-size: 11px;
       display: none;
       max-width: 90vw;
@@ -12907,7 +12907,7 @@ const __twsOuter = (() => {
     const cmLock = !!(s && s.cm);
     const el = document.createElement('div');
     el.id = 'tws-lock';
-    el.style.cssText = 'position:fixed;left:50%;bottom:12px;transform:translateX(-50%);z-index:999999;width:min(340px,calc(100vw - 24px));box-sizing:border-box;background:#1b1426;color:#ddd;border:1px solid #6b3fa0;border-radius:10px;box-shadow:0 4px 18px rgba(0,0,0,.6);font:13px/1.45 Arial,sans-serif;padding:10px 12px;';
+    el.style.cssText = 'position:fixed;left:50%;bottom:12px;transform:translateX(-50%);z-index:2147481099;width:min(340px,calc(100vw - 24px));box-sizing:border-box;background:#1b1426;color:#ddd;border:1px solid #6b3fa0;border-radius:10px;box-shadow:0 4px 18px rgba(0,0,0,.6);font:13px/1.45 Arial,sans-serif;padding:10px 12px;';
     el.innerHTML = `
       <div id="tws-lock-head" style="display:flex;align-items:center;gap:8px;cursor:pointer;">
         <img src="${LOGO_DATA_URI}" alt="" style="width:26px;height:26px;border-radius:6px;">
@@ -13125,7 +13125,7 @@ const __twsOuter = (() => {
     if (!items.length || document.getElementById('tws-whatsnew')) return;
     const el = document.createElement('div');
     el.id = 'tws-whatsnew';
-    el.style.cssText = 'position:fixed;left:50%;bottom:12px;transform:translateX(-50%);z-index:999999;width:min(340px,calc(100vw - 24px));box-sizing:border-box;background:#12232d;color:#ddd;border:1px solid #4fb3d9;border-radius:10px;box-shadow:0 4px 18px rgba(0,0,0,.6);font:13px/1.45 Arial,sans-serif;padding:10px 12px;';
+    el.style.cssText = 'position:fixed;left:50%;bottom:12px;transform:translateX(-50%);z-index:2147481099;width:min(340px,calc(100vw - 24px));box-sizing:border-box;background:#12232d;color:#ddd;border:1px solid #4fb3d9;border-radius:10px;box-shadow:0 4px 18px rgba(0,0,0,.6);font:13px/1.45 Arial,sans-serif;padding:10px 12px;';
     el.innerHTML = `
       <div style="display:flex;align-items:center;gap:8px;">
         <img src="${LOGO_DATA_URI}" alt="" style="width:26px;height:26px;border-radius:6px;">
