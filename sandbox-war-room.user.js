@@ -766,6 +766,7 @@ const __twsOuter = (() => {
 
     // --- Roster display ---
     { key: 'nameColors', group: 'Roster display', label: 'Colour names by online status' },
+    { key: 'respectHits', group: 'Roster display', label: '\ud83c\udfaf Respect view: war hits next to each player\u2019s respect', hint: 'How many war hits each player has made, on the Enemy and Home tabs, from the same figures as their respect.' },
     { key: 'hospIcon', group: 'Roster display', label: '\u271a Red cross instead of the word Hospital', hint: 'Hospital timers show a red cross and the time left, leaving more room for names.' },
     { key: 'scrollText', group: 'Roster display', label: '\u2194 Scroll names that don\u2019t fit', hint: 'On narrow screens, names cut off with \u2026 scroll round like a ticker, pausing for 3 seconds between loops.' },
     { key: 'onlineFlash', group: 'Roster display', label: 'Flash names that are online and attackable' },
@@ -1350,6 +1351,7 @@ const __twsOuter = (() => {
     return apiFetch(`faction/${ownId}`, 'attacksfull').then((data) => {
       const attacks = data.attacksfull || data.attacks || {};
       const map = {};
+      const liveHits = {};
       Object.values(attacks).forEach((a) => {
         if (!a) return;
         // v1's attacksfull doesn't reliably expose a ranked_war flag (that
@@ -1365,7 +1367,9 @@ const __twsOuter = (() => {
         if (!isOutgoing && !isIncoming) return;
         const id = String(a.attacker_id);
         map[id] = (map[id] || 0) + (a.respect || 0);
+        if ((Number(a.respect) || 0) > 0) liveHits[id] = (liveHits[id] || 0) + 1;
       });
+      hitsMap = liveHits;
       return map;
     });
   }
@@ -1383,6 +1387,7 @@ const __twsOuter = (() => {
       if (!rep || !rep.factions) throw new Error('report not available yet');
       const scores = {};
       const names = {};
+      const hits = {};
       Object.entries(rep.factions).forEach(([fid, f]) => {
         names[String(fid)] = (f && f.name) || null;
         const members = (f && f.members) || {};
@@ -1391,10 +1396,11 @@ const __twsOuter = (() => {
           : Object.entries(members);
         list.forEach(([uid, m]) => {
           if (uid !== undefined && m && m.score !== undefined) scores[String(uid)] = Number(m.score) || 0;
+          if (uid !== undefined && m && m.attacks !== undefined) hits[String(uid)] = Number(m.attacks) || 0;
         });
       });
       const w = rep.winner;
-      return { scores, names, winnerId: (w !== undefined && w !== null && /^\d+$/.test(String(w)) && Number(w) > 0) ? String(w) : null };
+      return { scores, names, hits, winnerId: (w !== undefined && w !== null && /^\d+$/.test(String(w)) && Number(w) > 0) ? String(w) : null };
     });
   }
 
@@ -8270,8 +8276,7 @@ const __twsOuter = (() => {
     const key = String(id);
     const m = enemyMembers.concat(homeMembers).find((x) => String(x.id) === key);
     const name = m ? m.name : `Player ${key}`;
-    const total = adjResp(key);
-    const rawTotal = typeof respectMap[key] === 'number' ? respectMap[key] : 0;
+    const total = typeof respectMap[key] === 'number' ? respectMap[key] : 0;
     const det = (warScoreCache && warScoreCache.detail) ? warScoreCache.detail[key] : null;
     const r2 = (v) => v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     let body;
@@ -8293,7 +8298,7 @@ const __twsOuter = (() => {
         ${det.b.length ? `<div class="tws-rc-sec"><b>\ud83d\udd17 Chain bonus hits</b>
           <table><tr><th>Hit</th><th>Respect</th><th>Bonus</th><th>TCT</th></tr>${rows}</table>
           <div class="tws-rc-dim" style="margin-top:4px;">Bonus = that hit\u2019s respect minus their average hit. Bonus total: <b style="color:#fff;">${r2(bonusTotal)}</b></div>
-          <div class="tws-rc-dim">Respect shown counts each bonus hit as an average hit. Including the bonuses it would be <b style="color:#fff;">${r2(rawTotal)}</b>.</div></div>` : ''}`;
+          <div class="tws-rc-dim">Respect without bonuses (bonus hits counted as average hits): <b style="color:#fff;">${r2(det.sum + avg * det.b.length)}</b></div></div>` : ''}`;
     }
     box.innerHTML = `<div class="tws-rc"><div class="tws-rc-head"><b>${escHtml(name)} \u00b7 ${r2(total)}R</b><span class="tws-rc-x" data-rc="close">\u00d7</span></div>${body}</div>`;
   }
@@ -8573,20 +8578,10 @@ const __twsOuter = (() => {
   let homeFfError = null;
   // War respect -- see fetchWarRespect above.
   let respectMap = {}; // id (string) -> total respect earned this war
+  let hitsMap = {}; // id (string) -> war hits made this war (hits that scored respect)
   let respectError = null;
   let respectLoading = false;
   let respectFetchedAt = 0;
-  let respectWarKey = ''; // which war's attack history goes with the figures (for the chain bonus adjustment)
-  // Respect with each chain bonus hit (10th, 25th, 50th ... hit) counted as one of that player's average hits instead.
-  // Needs the war's attack history, so the recent-attacks-only figures are left as they are.
-  function adjResp(id) {
-    const raw = typeof respectMap[id] === 'number' ? respectMap[id] : 0;
-    if (respectSource === 'live' || !warScoreCache || warScoreCache.key !== respectWarKey || !warScoreCache.detail) return raw;
-    const det = warScoreCache.detail[String(id)];
-    if (!det || !det.b.length) return raw;
-    const avg = det.n ? det.sum / det.n : 0;
-    return Math.max(0, raw - det.b.reduce((t, x) => t + x[1], 0) + avg * det.b.length);
-  }
   let respectSource = 'live'; // 'report' (Torn's official war report) or 'live' (recent attacks only)
   let respectNotice = null;
   const warReportCache = {}; // warId -> { scores, names, winnerId }
@@ -8980,8 +8975,8 @@ const __twsOuter = (() => {
           warReportCache[lw.warId] = rep;
         }
         respectMap = rep.scores;
+        hitsMap = rep.hits || {};
         respectSource = 'report';
-        respectWarKey = `r3-${lw.ownId}-${lw.enemyId}-${lw.startTime}-${lw.endTime || 0}`;
         if (lw.startTime && !warCheckStarted[lw.warId]) {
           warCheckStarted[lw.warId] = true;
           checkLiveMethod(lw, rep); // background self-check of the live method
@@ -9006,8 +9001,9 @@ const __twsOuter = (() => {
     if (liveWar && liveWar.startTime) {
       try {
         respectMap = await buildWarScores(ownId, enemyFactionId, liveWar.startTime, 0);
+        hitsMap = {};
+        Object.entries((warScoreCache && warScoreCache.detail) || {}).forEach(([id, d]) => { hitsMap[id] = (d.n || 0) + ((d.b && d.b.length) || 0); });
         respectSource = 'calc';
-        respectWarKey = `r3-${ownId}-${enemyFactionId}-${liveWar.startTime}-0`;
         return;
       } catch (e) {
         respectNotice = `Full attack history not available (${e.message}); showing recent attacks only.`;
@@ -12004,7 +12000,7 @@ const __twsOuter = (() => {
       });
     } else if (isRespectView) {
       // Members with no recorded hits count as 0 respect.
-      sorted = filtered.sort(byNumericField((m) => adjResp(m.id)));
+      sorted = filtered.sort(byNumericField((m) => (typeof respectMap[m.id] === 'number' ? respectMap[m.id] : 0)));
     } else {
       // Timer sort (v1.80.2):
       //   TOP section: members in Torn -- Okay, plus hospital/jail in Torn.
@@ -12077,9 +12073,9 @@ const __twsOuter = (() => {
         : '';
       const ffNum = (themeId === 'ff' && ffVal !== null) ? ` <span class="tws-ffval">FF ${ffVal.toFixed(2)}</span>` : '';
       const statsHtml = (featureOn('ffStats') && m.ff) ? ` <small class="tws-est${ffCol ? ' tws-est-ff' : ''}"${estStyle}>${estHtml(m.ff)}${ffNum}</small>` : '';
-      const respectVal = adjResp(m.id);
+      const respectVal = typeof respectMap[m.id] === 'number' ? respectMap[m.id] : 0;
       const respectHtml = isRespectView
-        ? ` <small class="tws-respect" data-resp-id="${m.id}" style="cursor:pointer;">${respectSource !== 'live' ? respectVal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : Math.round(respectVal).toLocaleString()}R</small>`
+        ? ` <small class="tws-respect" data-resp-id="${m.id}" style="cursor:pointer;">${respectSource !== 'live' ? respectVal.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : Math.round(respectVal).toLocaleString()}R${featureOn('respectHits') && typeof hitsMap[m.id] === 'number' ? ` \u00b7 ${hitsMap[m.id]} hit${hitsMap[m.id] === 1 ? '' : 's'}` : (featureOn('respectHits') && Object.keys(hitsMap).length ? ' \u00b7 0 hits' : '')}</small>`
         : '';
       const figureHtml = statsHtml + respectHtml;
       // Star toggle to add/remove from the personal Target watchlist --
