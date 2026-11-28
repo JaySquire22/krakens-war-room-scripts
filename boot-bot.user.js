@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Boot Bot
 // @namespace    kraken.bootbot
-// @version      1.0.0
+// @version      1.0.1
 // @description  Daily faction member viability scan for Torn: activity, Donator status, Xanax use and ranked war respect. Notifications plus a history log for analysis.
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/*
@@ -28,11 +28,11 @@
 (function () {
   'use strict';
 
-  const VERSION = '1.0.0';
+  const VERSION = '1.0.1';
   const PREFIX = 'bootbot_';
   const TAB_ID = Math.random().toString(36).slice(2);
   const API_GAP_MS = 1100;          // ~55 calls/min, leaves headroom for War Room on the same key
-  const LOCK_MS = 90 * 1000;        // another tab holding the scan lock within this window = skip
+  const LOCK_MS = 40 * 1000;        // another tab holding the scan lock within this window = skip
   const RESUME_MS = 6 * 3600 * 1000;// an unfinished scan younger than this resumes on next page
 
   // ───────────────────────── storage ─────────────────────────
@@ -371,6 +371,7 @@
 
   // ───────────────────────── scan ─────────────────────────
   let scanning = false;
+  let lastLiveRender = 0;
   function heartbeat() { if (scanning) S.set('lock', { tab: TAB_ID, ts: Date.now() }); }
   function lockedByOther() { const l = S.get('lock', null); return l && l.tab !== TAB_ID && Date.now() - l.ts < LOCK_MS; }
 
@@ -431,6 +432,7 @@
         S.set('scanState', st);
         done++;
         refreshIcon(Math.round((done / st.members.length) * 100));
+        if (panelOpen() && tab === 'report' && Date.now() - lastLiveRender > 2500) { lastLiveRender = Date.now(); render(); }
       }
 
       const snap = buildSnapshot(st, ts);
@@ -445,6 +447,7 @@
       if (panelOpen()) render();
     } catch (e) {
       console.error('[Boot Bot]', e);
+      S.set('scanBackoff', Date.now() + ([1, 2, 10, 13, 16, 18].includes(e.code) ? 3600 : 60) * 1000);
       setStatus('Scan stopped: ' + e.message + (e.code === 2 ? ' — check the key in Settings.' : ' — it will resume on the next page.'));
     } finally {
       scanning = false; onApiWait = null;
@@ -664,7 +667,7 @@
     const t = document.createElement('div'); t.className = 'bb-toast'; t.textContent = msg; document.body.appendChild(t);
     setTimeout(() => t.remove(), ms || 3500);
   }
-  function setStatus(s) { statusText = s; const el = document.getElementById('bb-status'); if (el) el.textContent = s; }
+  function setStatus(s) { statusText = s; S.set('status', { t: s, ts: Date.now() }); const el = document.getElementById('bb-status'); if (el) el.textContent = s; }
   const panelOpen = () => !!document.getElementById('bb-panel');
 
   function makeDraggable(el, handle, storeKey, onTap) {
@@ -732,6 +735,9 @@
     const p = document.getElementById('bb-panel'); if (!p) return;
     p.querySelectorAll('#bb-tabs button').forEach((b) => b.classList.toggle('on', b.dataset.t === tab));
     const log = getLog();
+    const saved = S.get('status', null);
+    const lastSnap = log[log.length - 1];
+    if (!statusText && saved && Date.now() - saved.ts < 12 * 3600 * 1000 && (!lastSnap || saved.ts > lastSnap.ts * 1000 - 60000)) statusText = saved.t;
     if (!statusText) {
       const last = log[log.length - 1];
       statusText = cfg().apiKey ? (last ? 'Last scan ' + fmtDT(last.ts) + (cfg().autoScan ? ' • auto-scan daily after ' + String(cfg().scanHourTCT).padStart(2, '0') + ':00 TCT' : '') : 'No scans yet — tap Scan now.') : 'Set up the faction API key in Settings.';
@@ -752,6 +758,13 @@
     const snap = currentSnap(log);
     let h = `<div class="bb-row"><button class="bb-btn red" data-a="scan" ${scanning ? 'disabled' : ''}>${scanning ? 'Scanning…' : 'Scan now'}</button>
       ${snap ? '<button class="bb-btn" data-a="exportSnap">Export CSV</button>' : ''}</div>`;
+    const prog = S.get('scanState', null);
+    if (prog && prog.members) {
+      const n = prog.members.length, d = Object.keys(prog.details || {}).length, pc = n ? Math.round((d / n) * 100) : 0;
+      h += `<div style="background:#1b212b;border-radius:6px;padding:8px 10px;margin-bottom:10px"><b>${scanning ? 'Scan in progress' : 'Scan paused — resumes automatically'}</b>
+        <div class="bb-muted">${d} of ${n} members checked (${pc}%). You can keep playing — it carries on across pages.</div>
+        <div style="height:6px;background:#0d1015;border-radius:3px;margin-top:6px"><div style="height:6px;width:${pc}%;background:#c0392b;border-radius:3px"></div></div></div>`;
+    }
     if (!snap) return h + '<p class="bb-muted">No scan yet. Boot Bot scans once a day automatically, or tap Scan now. The first scan takes a few minutes (about 1–2 API calls per member).</p>';
     const ids = Object.keys(snap.m);
     const rows = ids.map((id) => Object.assign({ id }, snap.m[id]));
@@ -947,14 +960,23 @@
   }
 
   // ───────────────────────── boot ─────────────────────────
+  function tryStart() {
+    if (scanning || lockedByOther()) return;
+    if (Date.now() < S.get('scanBackoff', 0)) return;
+    const st = S.get('scanState', null);
+    if (st && Date.now() - st.started < RESUME_MS) runScan(st.manual);
+    else if (shouldAutoScan()) runScan(false);
+  }
+
   function init() {
     if (!document.body) return setTimeout(init, 300);
     buildIcon();
-    setTimeout(() => {
-      const st = S.get('scanState', null);
-      if (st && Date.now() - st.started < RESUME_MS) runScan(st.manual);
-      else if (shouldAutoScan()) runScan(false);
-    }, 4000);
+    // release the scan lock when leaving a page so the next page can carry on straight away
+    const release = () => { if (scanning) { const l = S.get('lock', null); if (l && l.tab === TAB_ID) S.del('lock'); } };
+    window.addEventListener('pagehide', release);
+    window.addEventListener('beforeunload', release);
+    setTimeout(tryStart, 3000);
+    setInterval(tryStart, 15000); // picks up an unfinished scan if another tab/page let go of it
   }
 
   // Exposed for testing only
