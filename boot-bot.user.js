@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Boot Bot
 // @namespace    kraken.bootbot
-// @version      1.1.7
+// @version      1.1.8
 // @description  Daily faction member viability scan for Torn: activity, Donator status, Xanax use and ranked war respect. Notifications plus a history log for analysis.
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/*
@@ -28,7 +28,7 @@
 (function () {
   'use strict';
 
-  const VERSION = '1.1.7';
+  const VERSION = '1.1.8';
   const PREFIX = 'bootbot_';
   const TAB_ID = Math.random().toString(36).slice(2);
   const API_GAP_MS = 1100;          // ~55 calls/min, leaves headroom for War Room on the same key
@@ -831,7 +831,7 @@
   .bb-muted{color:#8a93a3;font-size:12px}
   `;
 
-  let rankBy = S.get('rankBy', 'win');
+  let rankBy = S.get('rankBy2', 'overall');
   let tab = 'report', filter = 'all', statusText = '', sortKey = 'flag', sortDir = -1, period = 30;
 
   function toast(msg, ms) {
@@ -957,12 +957,29 @@
   // (same as (gained − lost) ÷ (gained + lost) for a single war)
   const midPct = (p) => { const v = Math.round((p - 0.5) * 2000) / 10; return (v > 0 ? '+' : v < 0 ? '−' : '±') + fmtN(Math.abs(v), 1) + '%'; };
   const avgWars = (r) => (r.wavn || 0);
+  // Overall = position in the Avg war % table + position in the Xanax/day table (lower = better).
+  // Equal values share a position (1, 2, 2, 4…); no wars / no Xanax figure = joint last.
+  function rankPositions(list, cmp) {
+    const sorted = list.slice().sort(cmp);
+    const pos = new Map();
+    sorted.forEach((r, i) => pos.set(r.id, i > 0 && cmp(sorted[i - 1], r) === 0 ? pos.get(sorted[i - 1].id) : i + 1));
+    return pos;
+  }
+  function computeOverall(main) {
+    const warCmp = (a, b) => avgPct(b) - avgPct(a) || avgWars(b) - avgWars(a);
+    const xv = (r) => (r.xr == null ? -1 : r.xr);
+    const wr = rankPositions(main, warCmp);
+    const xr = rankPositions(main, (a, b) => xv(b) - xv(a));
+    main.forEach((r) => { r._wr = wr.get(r.id); r._xr = xr.get(r.id); r._ov = r._wr + r._xr; });
+  }
   const RANKS = {
+    overall: { label: 'Overall', key: (r) => -(r._ov || 9999), blurb: 'Overall = war position (Avg war %) + Xanax/day position; lowest total is best, ties go to the better war position' },
     win: { label: 'Wars won %', key: winPct, blurb: '% of wars with more respect gained than lost (null wars don\'t count)' },
     resp: { label: 'Avg war %', key: avgPct, blurb: 'average war performance — each war\'s gained ÷ (gained + lost), averaged and shown from −100% to +100% around break-even (null wars don\'t count)' },
     net: { label: 'Net respect', key: netOf, blurb: 'total respect gained minus lost' },
   };
   function rankBadge(r) {
+    if (rankBy === 'overall') return r._ov == null ? '' : `<span class="bb-muted">War #${r._wr} + Xan #${r._xr} =</span> <b>${r._ov}</b>`;
     if (!r.wi) return 'no wars';
     if (rankBy === 'net') { const n = netOf(r); return `<span class="${n > 0 ? 'pos' : n < 0 ? 'neg' : ''}">${n > 0 ? '+' : ''}${fmtN(n, 1)} net</span>`; }
     if (rankBy === 'resp') { if (r.wav === undefined) return 'rescan'; const p = avgPct(r); return p < 0 ? 'no wars' : `<span class="${p > 0.5 ? 'pos' : p < 0.5 ? 'neg' : ''}">${midPct(p)}</span> <span class="bb-muted">avg of ${avgWars(r)}</span>`; }
@@ -1018,12 +1035,15 @@
     h += `<div class="bb-sum">${box('all', main.length)}${box('fl', cnt('fl'), 1)}${box('A', cnt('A'), 1)}${box('D', cnt('D'), 1)}
       ${box('X', cnt('X'), 1)}${box('W', cnt('W'), 1)}${box('pd', cnt('pd'))}${box('ul', under.length)}</div>`;
     h += `<div class="bb-muted" style="margin-bottom:8px">Flagged = meets fewer than ${(snap.rules && snap.rules.need) || 3} of 4 criteria.
-      ${snap.wars && snap.wars.length ? 'Ranked by ' + RANKS[rankBy].blurb + ', over the last ' + snap.wars.length + ' ranked war' + (snap.wars.length > 1 ? 's' : '') + '. Ties go to whoever fought more wars.' : (snap.rules && snap.rules.cW ? 'No completed ranked war found yet.' : '')} Tap a name for details.</div>`;
+      ${snap.wars && snap.wars.length ? (rankBy === 'overall' ? RANKS.overall.blurb + '. War figures cover the last ' + snap.wars.length + ' ranked war' + (snap.wars.length > 1 ? 's' : '') + '.' : 'Ranked by ' + (RANKS[rankBy] || RANKS.overall).blurb + ', over the last ' + snap.wars.length + ' ranked war' + (snap.wars.length > 1 ? 's' : '') + '. Ties go to whoever fought more wars.') : (snap.rules && snap.rules.cW ? 'No completed ranked war found yet.' : '')} Tap a name for details.</div>`;
 
     // win % of counted (non-null) wars; ties go to whoever fought more wars, then net respect
-    const rk = (RANKS[rankBy] || RANKS.win).key;
-    const wc = rankBy === 'resp' ? avgWars : warsCounted;
-    const sorted = (list) => list.slice().sort((a, b) => rk(b) - rk(a) || wc(b) - wc(a) || netOf(b) - netOf(a) || a.met - b.met);
+    if (!RANKS[rankBy]) rankBy = 'overall';
+    computeOverall(main);
+    const rk = RANKS[rankBy].key;
+    const wc = rankBy === 'overall' ? (r) => -(r._wr || 9999) : rankBy === 'resp' ? avgWars : warsCounted;
+    const tb = rankBy === 'overall' ? (r) => -(r._xr || 9999) : netOf;
+    const sorted = (list) => list.slice().sort((a, b) => rk(b) - rk(a) || wc(b) - wc(a) || tb(b) - tb(a) || a.met - b.met);
     if (filter !== 'ul' && filter !== 'A') h += `<div class="bb-row"><span class="bb-muted">Rank by:</span>${Object.keys(RANKS).map((k) => `<span class="bb-chip ${rankBy === k ? 'on' : ''}" data-r="${k}">${RANKS[k].label}</span>`).join('')}</div>`;
     if (filter === 'ul') {
       h += `<div class="bb-sec">Under level ${minLv} (${under.length}) — not judged</div>`;
@@ -1195,7 +1215,7 @@
     if (t.dataset.t) { tab = t.dataset.t; statusText = ''; return render(); }
     const fb = t.closest('[data-f]');
     if (fb) { filter = fb.dataset.f; const b = document.getElementById('bb-body'); render(); if (b) { const sec = b.querySelector('.bb-sec'); if (sec) b.scrollTop = Math.max(0, sec.offsetTop - 60); } return; }
-    if (t.dataset.r) { rankBy = t.dataset.r; S.set('rankBy', rankBy); return render(); }
+    if (t.dataset.r) { rankBy = t.dataset.r; S.set('rankBy2', rankBy); return render(); }
     if (t.dataset.p != null && t.classList.contains('bb-chip')) { period = Number(t.dataset.p); return render(); }
     if (t.dataset.s) { if (sortKey === t.dataset.s) sortDir *= -1; else { sortKey = t.dataset.s; sortDir = t.dataset.s === 'name' ? 1 : -1; } return render(); }
     const tm = t.closest('[data-m]');
