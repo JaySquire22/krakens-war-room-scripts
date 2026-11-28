@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Boot Bot
 // @namespace    kraken.bootbot
-// @version      1.1.6
+// @version      1.1.7
 // @description  Daily faction member viability scan for Torn: activity, Donator status, Xanax use and ranked war respect. Notifications plus a history log for analysis.
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/*
@@ -28,7 +28,7 @@
 (function () {
   'use strict';
 
-  const VERSION = '1.1.6';
+  const VERSION = '1.1.7';
   const PREFIX = 'bootbot_';
   const TAB_ID = Math.random().toString(36).slice(2);
   const API_GAP_MS = 1100;          // ~55 calls/min, leaves headroom for War Room on the same key
@@ -216,6 +216,17 @@
     return drugs !== undefined ? drugs : null;
   }
 
+  // overdose count (all drugs) — v1 personalstats.overdosed, v2 list item or drugs.overdoses
+  function parseOD(j) {
+    if (!j) return null;
+    const direct = findDeep(j, (k, v) => (k === 'overdosed' && typeof v === 'number' ? v : undefined));
+    if (direct !== undefined) return direct;
+    const arr = findDeep(j, (k, v, parent) => (parent && parent.name === 'overdosed' && k === 'value' && typeof v === 'number' ? v : undefined));
+    if (arr !== undefined) return arr;
+    const drugs = findDeep(j, (k, v) => (k === 'drugs' && v && typeof v.overdoses === 'number' ? v.overdoses : undefined));
+    return drugs !== undefined ? drugs : null;
+  }
+
   function parseDonator(j) {
     if (!j) return null;
     const st = findDeep(j, (k, v) => (k === 'donator_status' ? (v || '') : undefined));
@@ -226,27 +237,29 @@
   }
 
   async function fetchMemberDetail(id) {
-    let xan = null, don = null;
+    let xan = null, don = null, od = null;
     try {
       const j = await api('user/' + id + '?selections=profile,personalstats');
       xan = parseXan(j.personalstats || j);
+      od = parseOD(j.personalstats || j);
       don = parseDonator(j);
     } catch (e) { if (e.code === 2) throw e; }
     if (don == null) {
       try { don = parseDonator(await api('v2/user/' + id + '/profile')); } catch (e) { /* leave null */ }
     }
     if (xan == null) {
-      try { xan = parseXan(await api('v2/user/' + id + '/personalstats?stat=xantaken')); } catch (e) { /* leave null */ }
+      try { const j = await api('v2/user/' + id + '/personalstats?stat=xantaken,overdosed'); xan = parseXan(j); if (od == null) od = parseOD(j); } catch (e) { /* leave null */ }
     }
-    return { xan, don };
+    return { xan, don, od };
   }
 
   let histUnsupported = false;
   async function fetchHistoricXan(id, ts) {
     if (histUnsupported) return null;
     try {
-      const v = parseXan(await api('v2/user/' + id + '/personalstats?stat=xantaken&timestamp=' + ts));
-      return v;
+      const j = await api('v2/user/' + id + '/personalstats?stat=xantaken,overdosed&timestamp=' + ts);
+      const x = parseXan(j);
+      return x == null ? null : { x, od: parseOD(j) };
     } catch (e) {
       if (e.code === 2) throw e;
       if ([6, 7, 16, 23].includes(e.code)) histUnsupported = true;
@@ -435,11 +448,10 @@
       if (snap.ts > ts - 12 * 3600) continue;          // need at least 12h of history
       const m = snap.m && snap.m[id];
       if (!m || m.x == null) continue;
-      if (!best || Math.abs(snap.ts - target) < Math.abs(best.ts - target)) best = { ts: snap.ts, x: m.x };
+      if (!best || Math.abs(snap.ts - target) < Math.abs(best.ts - target)) best = { ts: snap.ts, x: m.x, od: m.od };
     }
     if (!best) return null;
-    const days = (ts - best.ts) / 86400;
-    return { rate: (xanNow - best.x) / days, days, src: 'log' };
+    return { days: (ts - best.ts) / 86400, x0: best.x, od0: best.od, src: 'log' };
   }
 
   // ───────────────────────── activity tally ─────────────────────────
@@ -527,15 +539,22 @@
         let rate = null;
         if (d.xan != null) {
           const win = Number(c.xanaxWindowDays) || 1;
-          rate = xanaxRate(m.id, d.xan, ts, log, win);
+          let base = xanaxRate(m.id, d.xan, ts, log, win);
           // the log only helps once it covers the whole window; until then ask Torn for the history
-          if (c.checkXanax && (!rate || rate.days < win * 0.8)) {
-            const pastTs = ts - win * 86400;
-            const old = await fetchHistoricXan(m.id, pastTs);
-            if (old != null) rate = { rate: (d.xan - old) / win, days: win, src: 'hist' };
+          if (c.checkXanax && (!base || base.days < win * 0.8)) {
+            const old = await fetchHistoricXan(m.id, ts - win * 86400);
+            if (old != null) base = { days: win, x0: old.x, od0: old.od, src: 'hist' };
+          }
+          if (base) {
+            // each overdose in the window takes a day out of the time measured
+            const ods = d.od != null && base.od0 != null ? Math.max(0, d.od - base.od0) : 0;
+            const eff = base.days - ods;
+            rate = eff >= 0.5
+              ? { rate: (d.xan - base.x0) / eff, days: base.days, eff, ods, src: base.src }
+              : { rate: null, days: base.days, eff: 0, ods, src: base.src, odBlock: 1 };
           }
         }
-        st.details[m.id] = { xan: d.xan, don: d.don, rate };
+        st.details[m.id] = { xan: d.xan, don: d.don, od: d.od, rate };
         await KV.set('scanState', st);
         done++;
         refreshIcon(Math.round((done / st.members.length) * 100));
@@ -594,7 +613,7 @@
       if (c.checkActive && inactiveH != null && inactiveH > Number(c.inactiveHours)) f.push('A');
       if (c.checkDonator) { if (d.don == null) pend.push('D'); else if (!d.don.is) f.push('D'); }
       if (c.checkXanax) {
-        if (!d.rate) pend.push('X');
+        if (!d.rate || d.rate.rate == null) pend.push('X');
         else if (d.rate.rate + 1e-9 < Number(c.minXanaxPerDay)) f.push('X');
       }
       if (c.checkWars && wi > 0 && !(wg > wl)) f.push('W');
@@ -608,7 +627,8 @@
         n: mem.name, lv: mem.level, p: mem.position, dif: mem.daysInFaction,
         la: mem.lastAction, ih: inactiveH == null ? null : Math.round(inactiveH * 10) / 10,
         dn: d.don ? (d.don.is ? 1 : 0) : null, dt: d.don ? d.don.type : '',
-        x: d.xan, xr: d.rate ? Math.round(d.rate.rate * 100) / 100 : null, xd: d.rate ? Math.round(d.rate.days * 10) / 10 : null, xs: d.rate ? d.rate.src : '',
+        x: d.xan, od: d.od == null ? null : d.od, xo: d.rate ? d.rate.ods || 0 : 0,
+        xr: d.rate && d.rate.rate != null ? Math.round(d.rate.rate * 100) / 100 : null, xd: d.rate ? Math.round(d.rate.days * 10) / 10 : null, xs: d.rate ? d.rate.src : '',
         wg: Math.round(wg * 100) / 100, wl: Math.round(wl * 100) / 100, wh, wd, wi, wp, wj, wpos, wneg, wnull, wav: pctN ? Math.round((pctSum / pctN) * 10000) / 10000 : null, wavn: pctN,
         it: tallyOf(mem.id),
         f, pd: pend, met, fl, ul, ex,
@@ -706,7 +726,7 @@
   function csvCell(v) { const s = v == null ? '' : String(v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }
   function snapCSV(snaps) {
     const head = ['Scan date (TCT)', 'Member', 'ID', 'Position', 'Level', 'Under level', 'Days in faction', 'Last action (TCT)', 'Inactive hrs', 'Times inactive 24h+',
-      'Donator', 'Donator type', 'Xanax total', 'Xanax/day', 'Xanax window days',
+      'Donator', 'Donator type', 'Xanax total', 'Xanax/day', 'Xanax window days', 'Overdoses in window (days excluded)',
       'War respect gained', 'War respect lost', 'War net', 'Wars positive', 'Wars negative', 'Wars null', 'Avg war % vs break-even', 'Wars in avg', 'War hits', 'Wars measured', 'Wars fought in', 'Wars since joining',
       'Criteria met', 'Failed', 'Flagged', 'Exempt'];
     const rows = [head];
@@ -715,7 +735,7 @@
       for (const id of Object.keys(s.m)) {
         const r = s.m[id];
         rows.push([fmtDT(s.ts), r.n, id, r.p, r.lv, r.ul ? 'Yes' : '', r.dif, r.la ? fmtDT(r.la) : '', r.ih, r.it == null ? '' : r.it,
-          r.dn == null ? '?' : r.dn ? 'Yes' : 'No', r.dt, r.x, r.xr, r.xd,
+          r.dn == null ? '?' : r.dn ? 'Yes' : 'No', r.dt, r.x, r.xr, r.xd, r.xo || 0,
           r.wg, r.wl, Math.round((r.wg - r.wl) * 100) / 100, r.wpos == null ? '' : r.wpos, r.wneg == null ? '' : r.wneg, r.wnull == null ? '' : r.wnull, r.wav == null ? '' : Math.round((r.wav - 0.5) * 2000) / 10, r.wavn == null ? '' : r.wavn, r.wh, r.wi, r.wp == null ? '' : r.wp, r.wj == null ? '' : r.wj,
           r.met, r.f.map((c) => REASON[c]).join('; '), r.fl ? 'Yes' : '', r.ex ? 'Yes' : '']);
       }
@@ -789,7 +809,8 @@
   .bb-card .meta{color:#8a93a3;font-size:12px;margin-top:3px;line-height:1.5}
   .bb-tag{display:inline-block;font-size:11px;padding:1px 6px;border-radius:4px;margin:3px 4px 0 0;background:#5a1d17;color:#ffb3a8}
   .bb-tag.p{background:#2f3a4a;color:#b9c7d8}.bb-tag.ok{background:#1d4a2e;color:#a9e8bf}.bb-tag.fl{background:#c0392b;color:#fff;font-weight:bold}
-  .bb-tbl{width:100%;border-collapse:collapse;font-size:12px}.bb-tbl th,.bb-tbl td{padding:5px 4px;border-bottom:1px solid #262d38;text-align:left}
+  .bb-tbl{width:100%;border-collapse:collapse;font-size:12px}#bb-panel .bb-tbl td{color:#d2c2ff}
+  #bb-panel .bb-tbl td.pos,#bb-panel .bb-tbl .pos{color:#58d68d}#bb-panel .bb-tbl td.neg,#bb-panel .bb-tbl .neg{color:#ff8a7a}#bb-panel .bb-tbl td.bb-muted{color:#9a8fbf}.bb-tbl th,.bb-tbl td{padding:5px 4px;border-bottom:1px solid #262d38;text-align:left}
   .bb-tbl th{color:#8a93a3;cursor:pointer;position:sticky;top:-10px;background:#14181f}.bb-tbl td.n{text-align:right}
   .bb-tbl tr.click{cursor:pointer}.bb-tbl tr.click:hover{background:#1b212b}
   .bb-set{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid #222833;gap:10px}
@@ -962,14 +983,14 @@
     const cls = r.ul ? 'ul' : r.fl ? 'fl' : r.f.length ? 'warn' : '';
     const tags = (r.fl ? `<span class="bb-tag fl">FLAGGED — meets ${r.met}/4</span>` : '') +
       r.f.map((c) => `<span class="bb-tag">${esc(reasonText(r, c))}</span>`).join('') +
-      r.pd.map((c) => `<span class="bb-tag p">${c === 'X' ? 'Xanax: baseline (needs tomorrow)' : 'Donator: unknown'}</span>`).join('') +
+      r.pd.map((c) => `<span class="bb-tag p">${c === 'X' ? (r.xo ? 'Xanax: overdosed — whole window excluded' : 'Xanax: baseline (needs tomorrow)') : 'Donator: unknown'}</span>`).join('') +
       (r.ex ? '<span class="bb-tag ok">Exempt</span>' : '') + (!r.f.length && !r.pd.length && !r.ex && !r.ul ? '<span class="bb-tag ok">Meets all 4</span>' : '');
     return `<div class="bb-card ${cls}"><div class="top">${rank ? `<span class="rk">#${rank}</span>` : ''}<span class="nm" data-m="${r.id}">${esc(r.n)}</span>
       <a href="https://www.torn.com/profiles.php?XID=${r.id}" style="color:#8a93a3;font-size:11px">[${r.id}]</a>
       <span class="net">${rankBadge(r)}</span></div>
       <div class="bb-muted">Lv ${r.lv == null ? '?' : r.lv} • ${esc(r.p || '')}</div>${tags}
       <div class="meta">Active ${r.la ? fmtHrs(r.ih) + ' ago' : '–'}${r.it ? ' • inactive 24h+ <b>' + r.it + '×</b>' : ''} • ${r.dn == null ? 'Donator ?' : r.dn ? '✔ ' + esc(r.dt || 'Donator') : '✘ No Donator'} •
-      Xanax ${r.xr == null ? 'pending' : fmtN(r.xr, 1) + '/day' + (r.xd && r.xd > 1.5 ? ' (' + fmtN(r.xd, 1) + 'd avg)' : '')} •
+      Xanax ${r.xr == null ? 'pending' : fmtN(r.xr, 1) + '/day' + (r.xd && r.xd > 1.5 ? ' (' + fmtN(r.xd, 1) + 'd avg' + (r.xo ? ', ' + r.xo + ' OD day' + (r.xo > 1 ? 's' : '') + ' excluded' : '') + ')' : (r.xo ? ' (' + r.xo + ' OD excluded)' : ''))} •
       Wars ${r.wpos == null ? (r.wi ? r.wi + ' measured' : 'none since joining') : (r.wpos + r.wneg) ? r.wpos + ' positive, ' + r.wneg + ' negative' + (r.wnull ? ', ' + r.wnull + ' null' : '') : (r.wi ? r.wi + ' null' : 'none since joining')}</div></div>`;
   }
 
@@ -1150,7 +1171,7 @@
       <div class="bb-set"><label>Activity<small>Fails if not active for more than X hours</small></label>${num('inactiveHours', c.inactiveHours, 1, 720)}${sw('checkActive', c.checkActive)}</div>
       <div class="bb-set"><label>Donator status<small>Donator pack or subscription</small></label>${sw('checkDonator', c.checkDonator)}</div>
       <div class="bb-set"><label>Xanax per day (minimum)</label>${num('minXanaxPerDay', c.minXanaxPerDay, 0, 10, 0.5)}${sw('checkXanax', c.checkXanax)}</div>
-      <div class="bb-set"><label>Xanax measured over (days)<small>Average per day over this many days, from Torn's own history (up to 90)</small></label>${num('xanaxWindowDays', c.xanaxWindowDays, 1, 90)}</div>
+      <div class="bb-set"><label>Xanax measured over (days)<small>Average per day over this many days, from Torn's own history (up to 90). Each overdose in that time removes a day from the count.</small></label>${num('xanaxWindowDays', c.xanaxWindowDays, 1, 90)}</div>
       <div class="bb-set"><label>Ranked wars: gained &gt; lost<small>Cumulative over the last N ranked wars (max 50)</small></label>${num('warHistory', c.warHistory, 1, 50)}${sw('checkWars', c.checkWars)}</div>
       <div class="bb-set" style="display:block"><label>Exempt member IDs<small>Comma separated — shown but never flagged</small></label>
         <input type="text" class="wide" data-k="exemptIds" value="${esc(c.exemptIds)}" placeholder="e.g. 3616083, 1234567"></div>
