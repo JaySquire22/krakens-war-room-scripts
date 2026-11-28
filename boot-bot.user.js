@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Boot Bot
 // @namespace    kraken.bootbot
-// @version      1.0.1
+// @version      1.0.2
 // @description  Daily faction member viability scan for Torn: activity, Donator status, Xanax use and ranked war respect. Notifications plus a history log for analysis.
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/*
@@ -28,7 +28,7 @@
 (function () {
   'use strict';
 
-  const VERSION = '1.0.1';
+  const VERSION = '1.0.2';
   const PREFIX = 'bootbot_';
   const TAB_ID = Math.random().toString(36).slice(2);
   const API_GAP_MS = 1100;          // ~55 calls/min, leaves headroom for War Room on the same key
@@ -348,11 +348,69 @@
   }
 
   // ───────────────────────── log ─────────────────────────
-  const getLog = () => S.get('log', []);
-  function saveLog(log) {
+  // The log lives in IndexedDB: Torn's localStorage is shared with Torn and other scripts and can be full.
+  const IDB = {
+    db: null,
+    open() {
+      if (this.db) return Promise.resolve(true);
+      return new Promise((res) => {
+        try {
+          const r = indexedDB.open('bootbot', 1);
+          r.onupgradeneeded = () => r.result.createObjectStore('kv');
+          r.onsuccess = () => { this.db = r.result; res(true); };
+          r.onerror = () => res(false);
+          r.onblocked = () => res(false);
+        } catch (e) { res(false); }
+      });
+    },
+    get(k) {
+      return new Promise((res) => {
+        if (!this.db) return res(undefined);
+        try { const q = this.db.transaction('kv').objectStore('kv').get(k); q.onsuccess = () => res(q.result); q.onerror = () => res(undefined); }
+        catch (e) { res(undefined); }
+      });
+    },
+    put(k, v) {
+      return new Promise((res) => {
+        if (!this.db) return res(false);
+        try {
+          const tx = this.db.transaction('kv', 'readwrite');
+          tx.objectStore('kv').put(v, k);
+          tx.oncomplete = () => res(true);
+          tx.onerror = () => res(false);
+          tx.onabort = () => res(false);
+        } catch (e) { res(false); }
+      });
+    },
+  };
+  let LOG = null;
+  async function loadLog() {
+    await IDB.open();
+    let l = await IDB.get('log');
+    if (!Array.isArray(l)) l = [];
+    const old = S.get('log', null); // migrate anything saved by v1.0.0/1.0.1
+    if (Array.isArray(old) && old.length) {
+      const have = new Set(l.map((x) => x.ts));
+      old.forEach((x) => { if (!have.has(x.ts)) l.push(x); });
+      l.sort((a, b) => a.ts - b.ts);
+      if (await IDB.put('log', l)) S.del('log');
+    }
+    LOG = l;
+    return l;
+  }
+  const getLog = () => LOG || S.get('log', []);
+  async function saveLog(log) {
     const keepAfter = nowS() - cfg().logDays * 86400;
-    log = log.filter((s) => s.ts >= keepAfter).slice(-400);
-    while (!S.set('log', log) && log.length > 5) log = log.slice(Math.ceil(log.length * 0.1));
+    log = log.filter((x) => x.ts >= keepAfter).slice(-400);
+    LOG = log;
+    if (await IDB.put('log', log)) return true;
+    let l = log;
+    while (l.length) {
+      if (S.set('log', l)) return true;
+      if (l.length <= 1) break;
+      l = l.slice(Math.ceil(l.length * 0.25));
+    }
+    return false;
   }
 
   function xanaxRate(id, xanNow, ts, log, windowDays) {
@@ -412,7 +470,7 @@
         setStatus('Resuming scan…');
       }
 
-      const log = getLog();
+      const log = (await loadLog()).slice();
       const ts = nowS();
       const todo = st.members.filter((m) => !st.details[m.id]);
       let done = st.members.length - todo.length;
@@ -438,10 +496,10 @@
       const snap = buildSnapshot(st, ts);
       const prev = log.length ? log[log.length - 1] : null;
       log.push(snap);
-      saveLog(log);
       S.del('scanState');
+      const saved = await saveLog(log);
       S.set('lastAutoDay', tctDay(ts)); // a manual scan also counts as today's scan
-      setStatus('Scan complete — ' + snap.flagged + ' flagged of ' + snap.count + '.');
+      setStatus('Scan complete — ' + snap.flagged + ' flagged of ' + snap.count + '.' + (saved ? '' : ' ⚠ Could not save to the log on this device (storage full) — results shown for this session only.'));
       await notify(snap, prev);
       S.set('viewTs', snap.ts);
       if (panelOpen()) render();
@@ -728,6 +786,7 @@
     p.addEventListener('click', onClick);
     p.addEventListener('change', onChange);
     render();
+    loadLog().then(() => { if (panelOpen()) render(); refreshIcon(); });
   }
   function closePanel() { const p = document.getElementById('bb-panel'); if (p) p.remove(); }
 
@@ -916,7 +975,7 @@
     if (a === 'scan') { S.del('viewTs'); render(); await runScan(true); return render(); }
     if (a === 'exportSnap') { const s = currentSnap(getLog()); return exportCSV('bootbot-' + s.day + '.csv', snapCSV([s])); }
     if (a === 'exportLog') return exportCSV('bootbot-log-' + tctDay() + '.csv', snapCSV(getLog()));
-    if (a === 'clearLog') { if (window.confirm('Delete all Boot Bot scan history on this device?')) { S.del('log'); S.del('viewTs'); toast('Log cleared'); render(); refreshIcon(); } return; }
+    if (a === 'clearLog') { if (window.confirm('Delete all Boot Bot scan history on this device?')) { S.del('log'); LOG = []; await IDB.put('log', []); S.del('viewTs'); toast('Log cleared'); render(); refreshIcon(); } return; }
     if (a === 'detect') {
       setStatus('Looking for the War Room key…');
       const r = await autoDetectKey(setStatus);
@@ -975,13 +1034,14 @@
     const release = () => { if (scanning) { const l = S.get('lock', null); if (l && l.tab === TAB_ID) S.del('lock'); } };
     window.addEventListener('pagehide', release);
     window.addEventListener('beforeunload', release);
+    loadLog().then(refreshIcon);
     setTimeout(tryStart, 3000);
     setInterval(tryStart, 15000); // picks up an unfinished scan if another tab/page let go of it
   }
 
   // Exposed for testing only
   if (typeof window !== 'undefined' && window.__BOOTBOT_TEST__) {
-    window.__BOOTBOT__ = { runScan, aggregateWar, xanaxRate, parseXan, parseDonator, normaliseWars, buildSnapshot, getLog, cfg, saveCfg, candidateKeys, verifyKey, snapCSV, memberStats };
+    window.__BOOTBOT__ = { runScan, aggregateWar, xanaxRate, parseXan, parseDonator, normaliseWars, buildSnapshot, getLog, saveLog, cfg, saveCfg, candidateKeys, verifyKey, snapCSV, memberStats };
   }
   init();
 })();
