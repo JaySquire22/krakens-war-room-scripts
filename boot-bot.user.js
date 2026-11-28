@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Boot Bot
 // @namespace    kraken.bootbot
-// @version      1.1.5
+// @version      1.1.6
 // @description  Daily faction member viability scan for Torn: activity, Donator status, Xanax use and ranked war respect. Notifications plus a history log for analysis.
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/*
@@ -28,7 +28,7 @@
 (function () {
   'use strict';
 
-  const VERSION = '1.1.5';
+  const VERSION = '1.1.6';
   const PREFIX = 'bootbot_';
   const TAB_ID = Math.random().toString(36).slice(2);
   const API_GAP_MS = 1100;          // ~55 calls/min, leaves headroom for War Room on the same key
@@ -716,7 +716,7 @@
         const r = s.m[id];
         rows.push([fmtDT(s.ts), r.n, id, r.p, r.lv, r.ul ? 'Yes' : '', r.dif, r.la ? fmtDT(r.la) : '', r.ih, r.it == null ? '' : r.it,
           r.dn == null ? '?' : r.dn ? 'Yes' : 'No', r.dt, r.x, r.xr, r.xd,
-          r.wg, r.wl, Math.round((r.wg - r.wl) * 100) / 100, r.wpos == null ? '' : r.wpos, r.wneg == null ? '' : r.wneg, r.wnull == null ? '' : r.wnull, r.wav == null ? '' : Math.round((r.wav - 0.5) * 1000) / 10, r.wavn == null ? '' : r.wavn, r.wh, r.wi, r.wp == null ? '' : r.wp, r.wj == null ? '' : r.wj,
+          r.wg, r.wl, Math.round((r.wg - r.wl) * 100) / 100, r.wpos == null ? '' : r.wpos, r.wneg == null ? '' : r.wneg, r.wnull == null ? '' : r.wnull, r.wav == null ? '' : Math.round((r.wav - 0.5) * 2000) / 10, r.wavn == null ? '' : r.wavn, r.wh, r.wi, r.wp == null ? '' : r.wp, r.wj == null ? '' : r.wj,
           r.met, r.f.map((c) => REASON[c]).join('; '), r.fl ? 'Yes' : '', r.ex ? 'Yes' : '']);
       }
     }
@@ -932,12 +932,13 @@
   const winPct = (r) => (warsCounted(r) ? r.wpos / warsCounted(r) : -1);
   // average of each war's gained ÷ (gained + lost); wars with no respect either way are left out
   const avgPct = (r) => (r.wav == null ? -1 : r.wav);
-  // shown relative to the 50% break-even line: 65% → +15%, 40% → −10%
-  const midPct = (p) => { const v = Math.round((p - 0.5) * 1000) / 10; return (v > 0 ? '+' : v < 0 ? '−' : '±') + fmtN(Math.abs(v), 1) + '%'; };
+  // shown on a −100%…+100% scale around break-even: 65% gained → +30%, 40% → −20%
+  // (same as (gained − lost) ÷ (gained + lost) for a single war)
+  const midPct = (p) => { const v = Math.round((p - 0.5) * 2000) / 10; return (v > 0 ? '+' : v < 0 ? '−' : '±') + fmtN(Math.abs(v), 1) + '%'; };
   const avgWars = (r) => (r.wavn || 0);
   const RANKS = {
     win: { label: 'Wars won %', key: winPct, blurb: '% of wars with more respect gained than lost (null wars don\'t count)' },
-    resp: { label: 'Avg war %', key: avgPct, blurb: 'average war performance — each war\'s gained ÷ (gained + lost), averaged and shown above/below the 50% break-even line (null wars don\'t count)' },
+    resp: { label: 'Avg war %', key: avgPct, blurb: 'average war performance — each war\'s gained ÷ (gained + lost), averaged and shown from −100% to +100% around break-even (null wars don\'t count)' },
     net: { label: 'Net respect', key: netOf, blurb: 'total respect gained minus lost' },
   };
   function rankBadge(r) {
@@ -1109,7 +1110,7 @@
         <div><b class="pos">+${fmtN(tg, 1)}</b>Respect gained</div><div><b class="neg">−${fmtN(tl, 1)}</b>Respect lost</div><div><b class="${tnet > 0 ? 'pos' : tnet < 0 ? 'neg' : ''}">${tnet > 0 ? '+' : ''}${fmtN(tnet, 1)}</b>Net</div></div>`;
     h += wars.length
       ? `<table class="bb-tbl"><tr><th>Ended</th><th>Enemy</th><th>Hits</th><th>Gained</th><th>Lost</th><th>War %</th><th>Net</th></tr>${warRows}</table>
-         <div class="bb-muted" style="margin-top:4px">War % = how far that war's gained ÷ (gained + lost) sits above or below the 50% break-even line (0% = gained the same as lost); Avg war % is the average of those. ▲ = gained more than lost in that war, ▼ = lost more. Null = no respect gained or lost (not counted). Lost = respect the enemy took hitting this member.</div>`
+         <div class="bb-muted" style="margin-top:4px">War % = (gained − lost) ÷ (gained + lost) for that war: +100% = gained and never lost, 0% = gained the same as lost, −100% = only lost. Avg war % is the average of those. ▲ = gained more than lost in that war, ▼ = lost more. Null = no respect gained or lost (not counted). Lost = respect the enemy took hitting this member.</div>`
       : '<p class="bb-muted">No measured ranked wars since joining.</p>';
 
     h += `<div class="bb-h">Inactive over ${cfg().inactiveHours}h — ${eps.length} time${eps.length === 1 ? '' : 's'}</div>`;
