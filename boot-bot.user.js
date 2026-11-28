@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Boot Bot
 // @namespace    kraken.bootbot
-// @version      1.1.8
+// @version      1.1.9
 // @description  Daily faction member viability scan for Torn: activity, Donator status, Xanax use and ranked war respect. Notifications plus a history log for analysis.
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/*
@@ -28,7 +28,7 @@
 (function () {
   'use strict';
 
-  const VERSION = '1.1.8';
+  const VERSION = '1.1.9';
   const PREFIX = 'bootbot_';
   const TAB_ID = Math.random().toString(36).slice(2);
   const API_GAP_MS = 1100;          // ~55 calls/min, leaves headroom for War Room on the same key
@@ -62,7 +62,8 @@
     warHistory: 10,          // most recent completed ranked wars used for cumulative war respect
     minCriteria: 3,          // flag anyone meeting fewer than this many of the 4 criteria
     minLevel: 15,            // members below this level are listed separately, not judged
-    activitySampling: true,  // hourly activity check while Torn is open (catches more 24h+ absences)
+    activitySampling: true,
+    termedWars: [],          // ranked war IDs marked as termed — left out of every war figure  // hourly activity check while Torn is open (catches more 24h+ absences)
     exemptIds: '',
     notifyToast: true,
     notifyBrowser: true,
@@ -634,13 +635,56 @@
         f, pd: pend, met, fl, ul, ex,
       };
     }
-    return {
+    return applyWars({
       v: 2, ts, day: tctDay(ts), manual: !!st.manual, fid: st.factionId, fname: st.factionName,
       count: st.members.length, judged, flagged,
       wars: wars.map((w) => ({ id: w.war.id, end: w.war.end, enemy: w.war.enemyName })),
       rules: { ih: c.inactiveHours, mx: c.minXanaxPerDay, xw: c.xanaxWindowDays, need, minLv, cA: c.checkActive, cD: c.checkDonator, cX: c.checkXanax, cW: c.checkWars },
       m,
-    };
+    });
+  }
+
+  // ───────────────────────── termed wars ─────────────────────────
+  const termedSet = () => new Set((cfg().termedWars || []).map(String));
+  // Works out every war figure from the stored war data, leaving termed wars out, and re-judges the
+  // war criterion and flags. Runs on every view, so marking a war termed needs no new scan.
+  function applyWars(snap) {
+    if (!snap || !snap.m || !snap.wars || !snap.wars.length) return snap;
+    const cache = KV.get('warCache', {});
+    const wars = snap.wars.map((w) => cache[snap.fid + ':' + w.id]).filter(Boolean);
+    if (wars.length !== snap.wars.length) return snap;
+    const termed = termedSet();
+    const use = wars.filter((w) => !termed.has(String(w.war.id)));
+    const allWars = (KV.get('warList', { list: [] }).list) || [];
+    const rules = snap.rules || {};
+    const need = rules.need || 3;
+    let flagged = 0;
+    for (const id of Object.keys(snap.m)) {
+      const r = snap.m[id];
+      const joined = r.dif != null ? snap.ts - r.dif * 86400 : 0;
+      let wg = 0, wl = 0, wh = 0, wd = 0, wi = 0, wp = 0, wpos = 0, wneg = 0, wnull = 0, ps = 0, pn = 0;
+      for (const w of use) {
+        if (joined > w.war.end) continue;
+        wi++;
+        const x = w.per[id];
+        if (x) { wg += x.g; wl += x.l; wh += x.h; wd += x.d; if (x.h > 0) wp++; }
+        const wn = x ? Math.round((x.g - x.l) * 100) / 100 : 0;
+        if (wn > 0) wpos++; else if (wn < 0) wneg++; else wnull++;
+        if (x && x.g + x.l > 0) { ps += x.g / (x.g + x.l); pn++; }
+      }
+      Object.assign(r, { wg: Math.round(wg * 100) / 100, wl: Math.round(wl * 100) / 100, wh, wd, wi, wp, wpos, wneg, wnull,
+        wav: pn ? Math.round((ps / pn) * 10000) / 10000 : null, wavn: pn });
+      if (allWars.length) r.wj = allWars.filter((w) => w.end >= joined && !termed.has(String(w.id))).length;
+      const f = r.f.filter((c) => c !== 'W');
+      if (rules.cW !== false && wi > 0 && !(wg > wl)) f.push('W');
+      r.f = CRIT.filter((c) => f.includes(c));
+      r.met = CRIT.length - r.f.length;
+      r.fl = !r.ul && !r.ex && r.met < need ? 1 : 0;
+      if (r.fl) flagged++;
+    }
+    snap.flagged = flagged;
+    snap.termed = wars.length - use.length;
+    return snap;
   }
 
   // v1.0.x snapshots don't have the newer fields; fill them so old scans still display
@@ -880,7 +924,7 @@
 
   function refreshIcon(pct) {
     const ic = document.getElementById('bb-icon'); if (!ic) return;
-    const log = getLog(); const last = normSnap(log[log.length - 1]);
+    const log = getLog(); const last = applyWars(normSnap(log[log.length - 1]));
     const b = ic.querySelector('.bb-badge'), p = ic.querySelector('.bb-prog');
     if (last && last.flagged) { b.style.display = ''; b.textContent = last.flagged; } else b.style.display = 'none';
     if (scanning) { p.style.display = ''; p.textContent = pct != null ? pct + '%' : '…'; } else p.style.display = 'none';
@@ -922,30 +966,9 @@
     body.scrollTop = keepScroll;
   }
 
-  // scans made before v1.1.4 have no Avg war % — work it out from the stored war data
-  function fillWarAvg(snap) {
-    if (!snap || !snap.wars || !snap.wars.length) return snap;
-    const cache = KV.get('warCache', {});
-    const wars = snap.wars.map((w) => cache[snap.fid + ':' + w.id]).filter(Boolean);
-    if (wars.length !== snap.wars.length) return snap;
-    for (const id of Object.keys(snap.m)) {
-      const r = snap.m[id];
-      if (r.wav !== undefined) continue;
-      const joined = r.dif != null ? snap.ts - r.dif * 86400 : 0;
-      let ps = 0, pn = 0;
-      for (const w of wars) {
-        if (joined > w.war.end) continue;
-        const x = w.per[id];
-        if (x && x.g + x.l > 0) { ps += x.g / (x.g + x.l); pn++; }
-      }
-      r.wav = pn ? Math.round((ps / pn) * 10000) / 10000 : null; r.wavn = pn;
-    }
-    return snap;
-  }
-
   function currentSnap(log) {
     const v = S.get('viewTs', null);
-    return fillWarAvg(normSnap((v && log.find((s) => s.ts === v)) || log[log.length - 1] || null));
+    return applyWars(normSnap((v && log.find((s) => s.ts === v)) || log[log.length - 1] || null));
   }
 
   const netOf = (r) => (r.wg || 0) - (r.wl || 0);
@@ -1035,7 +1058,7 @@
     h += `<div class="bb-sum">${box('all', main.length)}${box('fl', cnt('fl'), 1)}${box('A', cnt('A'), 1)}${box('D', cnt('D'), 1)}
       ${box('X', cnt('X'), 1)}${box('W', cnt('W'), 1)}${box('pd', cnt('pd'))}${box('ul', under.length)}</div>`;
     h += `<div class="bb-muted" style="margin-bottom:8px">Flagged = meets fewer than ${(snap.rules && snap.rules.need) || 3} of 4 criteria.
-      ${snap.wars && snap.wars.length ? (rankBy === 'overall' ? RANKS.overall.blurb + '. War figures cover the last ' + snap.wars.length + ' ranked war' + (snap.wars.length > 1 ? 's' : '') + '.' : 'Ranked by ' + (RANKS[rankBy] || RANKS.overall).blurb + ', over the last ' + snap.wars.length + ' ranked war' + (snap.wars.length > 1 ? 's' : '') + '. Ties go to whoever fought more wars.') : (snap.rules && snap.rules.cW ? 'No completed ranked war found yet.' : '')} Tap a name for details.</div>`;
+      ${snap.wars && snap.wars.length ? (rankBy === 'overall' ? RANKS.overall.blurb + '. War figures cover the last ' + snap.wars.length + ' ranked war' + (snap.wars.length > 1 ? 's' : '') + '.' : 'Ranked by ' + (RANKS[rankBy] || RANKS.overall).blurb + ', over the last ' + snap.wars.length + ' ranked war' + (snap.wars.length > 1 ? 's' : '') + '. Ties go to whoever fought more wars.') : (snap.rules && snap.rules.cW ? 'No completed ranked war found yet.' : '')}${snap.termed ? ' <b>' + snap.termed + ' termed war' + (snap.termed > 1 ? 's' : '') + ' left out.</b>' : ''} Tap a name for details.</div>`;
 
     // win % of counted (non-null) wars; ties go to whoever fought more wars, then net respect
     if (!RANKS[rankBy]) rankBy = 'overall';
@@ -1128,8 +1151,13 @@
     const wars = Object.keys(cache).filter((k) => k.startsWith(fid + ':')).map((k) => cache[k])
       .filter((w) => w.war.end >= joined).sort((a, b) => b.war.end - a.war.end);
     let tg = 0, tl = 0, th = 0, np = 0, nn = 0, nz = 0, ps = 0, pn = 0;
+    const termed = termedSet();
     const warRows = wars.map((w) => {
       const x = w.per[id] || { g: 0, l: 0, h: 0, d: 0 };
+      if (termed.has(String(w.war.id))) {
+        return `<tr style="opacity:.55"><td>${tctDay(w.war.end)}</td><td>${esc(w.war.enemyName)}</td><td class="n">${x.h}</td><td class="n">${fmtN(x.g, 1)}</td><td class="n">${fmtN(x.l, 1)}</td>
+          <td class="n bb-muted" colspan="2">Termed</td></tr>`;
+      }
       tg += x.g; tl += x.l; th += x.h;
       const n = Math.round((x.g - x.l) * 100) / 100;
       if (n > 0) np++; else if (n < 0) nn++; else nz++;
@@ -1151,7 +1179,7 @@
         <div><b class="pos">+${fmtN(tg, 1)}</b>Respect gained</div><div><b class="neg">−${fmtN(tl, 1)}</b>Respect lost</div><div><b class="${tnet > 0 ? 'pos' : tnet < 0 ? 'neg' : ''}">${tnet > 0 ? '+' : ''}${fmtN(tnet, 1)}</b>Net</div></div>`;
     h += wars.length
       ? `<table class="bb-tbl"><tr><th>Ended</th><th>Enemy</th><th>Hits</th><th>Gained</th><th>Lost</th><th>War %</th><th>Net</th></tr>${warRows}</table>
-         <div class="bb-muted" style="margin-top:4px">War % = (gained − lost) ÷ (gained + lost) for that war: +100% = gained and never lost, 0% = gained the same as lost, −100% = only lost. Avg war % is the average of those. ▲ = gained more than lost in that war, ▼ = lost more. Null = no respect gained or lost (not counted). Lost = respect the enemy took hitting this member.</div>`
+         <div class="bb-muted" style="margin-top:4px">War % = (gained − lost) ÷ (gained + lost) for that war: +100% = gained and never lost, 0% = gained the same as lost, −100% = only lost. Avg war % is the average of those. ▲ = gained more than lost in that war, ▼ = lost more. Null = no respect gained or lost (not counted). Termed wars are left out of everything. Lost = respect the enemy took hitting this member.</div>`
       : '<p class="bb-muted">No measured ranked wars since joining.</p>';
 
     h += `<div class="bb-h">Inactive over ${cfg().inactiveHours}h — ${eps.length} time${eps.length === 1 ? '' : 's'}</div>`;
@@ -1168,6 +1196,16 @@
 
   const sw = (k, on) => `<label class="bb-sw"><input type="checkbox" data-k="${k}" ${on ? 'checked' : ''}><span></span></label>`;
   const num = (k, v, min, max, step) => `<input type="number" data-k="${k}" value="${v}" min="${min}" max="${max}" step="${step || 1}" style="width:80px">`;
+
+  function termedList() {
+    const fid = (S.get('faction', {}) || {}).id;
+    const cache = KV.get('warCache', {});
+    const wars = Object.keys(cache).filter((k) => k.startsWith(fid + ':')).map((k) => cache[k].war).sort((a, b) => b.end - a.end).slice(0, 25);
+    if (!wars.length) return '<div class="bb-muted">No ranked wars loaded yet — run a scan first.</div>';
+    const t = termedSet();
+    return wars.map((w) => `<div class="bb-set"><label>vs ${esc(w.enemyName)}<small>Ended ${tctDay(w.end)}${t.has(String(w.id)) ? ' • termed' : ''}</small></label>
+      <label class="bb-sw"><input type="checkbox" data-tw="${w.id}" ${t.has(String(w.id)) ? 'checked' : ''}><span></span></label></div>`).join('');
+  }
 
   function renderSettings() {
     const c = cfg(); const fac = S.get('faction', null);
@@ -1195,6 +1233,10 @@
       <div class="bb-set"><label>Ranked wars: gained &gt; lost<small>Cumulative over the last N ranked wars (max 50)</small></label>${num('warHistory', c.warHistory, 1, 50)}${sw('checkWars', c.checkWars)}</div>
       <div class="bb-set" style="display:block"><label>Exempt member IDs<small>Comma separated — shown but never flagged</small></label>
         <input type="text" class="wide" data-k="exemptIds" value="${esc(c.exemptIds)}" placeholder="e.g. 3616083, 1234567"></div>
+
+      <div class="bb-h">Termed wars</div>
+      <div class="bb-muted" style="margin-bottom:4px">Switch on any war that was termed — it's left out of every war figure, ranking and flag straight away (no new scan needed).</div>
+      ${termedList()}
 
       <div class="bb-h">Notifications</div>
       <div class="bb-set"><label>On-screen alert after each scan</label>${sw('notifyToast', c.notifyToast)}</div>
@@ -1264,6 +1306,17 @@
   }
 
   function onChange(e) {
+    if (e.target.dataset.tw) {
+      const id = String(e.target.dataset.tw);
+      const t = termedSet();
+      if (e.target.checked) t.add(id); else t.delete(id);
+      saveCfg({ termedWars: [...t] });
+      setStatus(e.target.checked ? 'War marked as termed — left out of all war figures.' : 'War counted again.');
+      refreshIcon();
+      const lab = e.target.closest('.bb-set').querySelector('small');
+      if (lab) lab.textContent = lab.textContent.replace(' • termed', '') + (e.target.checked ? ' • termed' : '');
+      return;
+    }
     const k = e.target.dataset.k; if (!k) return;
     let v;
     if (e.target.type === 'checkbox') v = e.target.checked;
