@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Boot Bot
 // @namespace    kraken.bootbot
-// @version      1.1.1
+// @version      1.1.2
 // @description  Daily faction member viability scan for Torn: activity, Donator status, Xanax use and ranked war respect. Notifications plus a history log for analysis.
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/*
@@ -28,7 +28,7 @@
 (function () {
   'use strict';
 
-  const VERSION = '1.1.1';
+  const VERSION = '1.1.2';
   const PREFIX = 'bootbot_';
   const TAB_ID = Math.random().toString(36).slice(2);
   const API_GAP_MS = 1100;          // ~55 calls/min, leaves headroom for War Room on the same key
@@ -905,6 +905,8 @@
   }
 
   const netOf = (r) => (r.wg || 0) - (r.wl || 0);
+  const warsCounted = (r) => (r.wpos || 0) + (r.wneg || 0);
+  const winPct = (r) => (warsCounted(r) ? r.wpos / warsCounted(r) : -1);
   const FILTERS = {
     all: { label: 'Overview', test: () => true },
     fl: { label: 'Flagged', test: (r) => r.fl },
@@ -923,7 +925,7 @@
       (r.ex ? '<span class="bb-tag ok">Exempt</span>' : '') + (!r.f.length && !r.pd.length && !r.ex && !r.ul ? '<span class="bb-tag ok">Meets all 4</span>' : '');
     return `<div class="bb-card ${cls}"><div class="top">${rank ? `<span class="rk">#${rank}</span>` : ''}<span class="nm" data-m="${r.id}">${esc(r.n)}</span>
       <a href="https://www.torn.com/profiles.php?XID=${r.id}" style="color:#8a93a3;font-size:11px">[${r.id}]</a>
-      <span class="net">${r.wpos == null ? (r.wi ? '' : 'no wars') : (r.wpos + r.wneg) ? `<span class="pos">${r.wpos}▲</span> <span class="neg">${r.wneg}▼</span>` : 'no wars'}</span></div>
+      <span class="net">${r.wpos == null ? (r.wi ? '' : 'no wars') : (r.wpos + r.wneg) ? `<span class="pos">${r.wpos}▲</span> <span class="neg">${r.wneg}▼</span> <span class="${winPct(r) >= 0.5 ? 'pos' : 'neg'}">${Math.round(winPct(r) * 100)}%</span>` : 'no wars'}</span></div>
       <div class="bb-muted">Lv ${r.lv == null ? '?' : r.lv} • ${esc(r.p || '')}</div>${tags}
       <div class="meta">Active ${r.la ? fmtHrs(r.ih) + ' ago' : '–'}${r.it ? ' • inactive 24h+ <b>' + r.it + '×</b>' : ''} • ${r.dn == null ? 'Donator ?' : r.dn ? '✔ ' + esc(r.dt || 'Donator') : '✘ No Donator'} •
       Xanax ${r.xr == null ? 'pending' : fmtN(r.xr, 1) + '/day' + (r.xd && r.xd > 1.5 ? ' (' + fmtN(r.xd, 1) + 'd avg)' : '')} •
@@ -954,9 +956,10 @@
     h += `<div class="bb-sum">${box('all', main.length)}${box('fl', cnt('fl'), 1)}${box('A', cnt('A'), 1)}${box('D', cnt('D'), 1)}
       ${box('X', cnt('X'), 1)}${box('W', cnt('W'), 1)}${box('pd', cnt('pd'))}${box('ul', under.length)}</div>`;
     h += `<div class="bb-muted" style="margin-bottom:8px">Flagged = meets fewer than ${(snap.rules && snap.rules.need) || 3} of 4 criteria.
-      ${snap.wars && snap.wars.length ? 'Ranked by cumulative war respect (gained − lost) over the last ' + snap.wars.length + ' ranked war' + (snap.wars.length > 1 ? 's' : '') + '; ▲/▼ = wars won/lost on respect.' : (snap.rules && snap.rules.cW ? 'No completed ranked war found yet.' : '')} Tap a name for details.</div>`;
+      ${snap.wars && snap.wars.length ? 'Ranked by % of wars with more respect gained than lost (last ' + snap.wars.length + ' ranked war' + (snap.wars.length > 1 ? 's' : '') + '); ties go to whoever fought more wars. Null wars don\'t count.' : (snap.rules && snap.rules.cW ? 'No completed ranked war found yet.' : '')} Tap a name for details.</div>`;
 
-    const sorted = (list) => list.slice().sort((a, b) => netOf(b) - netOf(a) || (b.wg || 0) - (a.wg || 0) || a.met - b.met);
+    // win % of counted (non-null) wars; ties go to whoever fought more wars, then net respect
+    const sorted = (list) => list.slice().sort((a, b) => winPct(b) - winPct(a) || warsCounted(b) - warsCounted(a) || netOf(b) - netOf(a) || a.met - b.met);
     if (filter === 'ul') {
       h += `<div class="bb-sec">Under level ${minLv} (${under.length}) — not judged</div>`;
       h += under.length ? under.map((r) => card(r)).join('') : '<p class="bb-muted">Nobody under level ' + minLv + '.</p>';
