@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Boot Bot
 // @namespace    kraken.bootbot
-// @version      1.1.2
+// @version      1.1.3
 // @description  Daily faction member viability scan for Torn: activity, Donator status, Xanax use and ranked war respect. Notifications plus a history log for analysis.
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/*
@@ -28,7 +28,7 @@
 (function () {
   'use strict';
 
-  const VERSION = '1.1.2';
+  const VERSION = '1.1.3';
   const PREFIX = 'bootbot_';
   const TAB_ID = Math.random().toString(36).slice(2);
   const API_GAP_MS = 1100;          // ~55 calls/min, leaves headroom for War Room on the same key
@@ -809,6 +809,7 @@
   .bb-muted{color:#8a93a3;font-size:12px}
   `;
 
+  let rankBy = S.get('rankBy', 'win');
   let tab = 'report', filter = 'all', statusText = '', sortKey = 'flag', sortDir = -1, period = 30;
 
   function toast(msg, ms) {
@@ -907,6 +908,19 @@
   const netOf = (r) => (r.wg || 0) - (r.wl || 0);
   const warsCounted = (r) => (r.wpos || 0) + (r.wneg || 0);
   const winPct = (r) => (warsCounted(r) ? r.wpos / warsCounted(r) : -1);
+  const respPct = (r) => ((r.wg || 0) + (r.wl || 0) > 0 ? r.wg / (r.wg + r.wl) : -1);
+  const RANKS = {
+    win: { label: 'Wars won %', key: winPct, blurb: '% of wars with more respect gained than lost (null wars don\'t count)' },
+    resp: { label: 'Respect %', key: respPct, blurb: 'share of all war respect that was gained: gained ÷ (gained + lost)' },
+    net: { label: 'Net respect', key: netOf, blurb: 'total respect gained minus lost' },
+  };
+  function rankBadge(r) {
+    if (!r.wi) return 'no wars';
+    if (rankBy === 'net') { const n = netOf(r); return `<span class="${n > 0 ? 'pos' : n < 0 ? 'neg' : ''}">${n > 0 ? '+' : ''}${fmtN(n, 1)} net</span>`; }
+    if (rankBy === 'resp') { const p = respPct(r); return p < 0 ? 'no respect' : `<span class="pos">+${fmtN(r.wg, 0)}</span> <span class="neg">−${fmtN(r.wl, 0)}</span> <span class="${p >= 0.5 ? 'pos' : 'neg'}">${Math.round(p * 100)}%</span>`; }
+    if (r.wpos == null) return '';
+    return warsCounted(r) ? `<span class="pos">${r.wpos}▲</span> <span class="neg">${r.wneg}▼</span> <span class="${winPct(r) >= 0.5 ? 'pos' : 'neg'}">${Math.round(winPct(r) * 100)}%</span>` : 'no wars';
+  }
   const FILTERS = {
     all: { label: 'Overview', test: () => true },
     fl: { label: 'Flagged', test: (r) => r.fl },
@@ -925,7 +939,7 @@
       (r.ex ? '<span class="bb-tag ok">Exempt</span>' : '') + (!r.f.length && !r.pd.length && !r.ex && !r.ul ? '<span class="bb-tag ok">Meets all 4</span>' : '');
     return `<div class="bb-card ${cls}"><div class="top">${rank ? `<span class="rk">#${rank}</span>` : ''}<span class="nm" data-m="${r.id}">${esc(r.n)}</span>
       <a href="https://www.torn.com/profiles.php?XID=${r.id}" style="color:#8a93a3;font-size:11px">[${r.id}]</a>
-      <span class="net">${r.wpos == null ? (r.wi ? '' : 'no wars') : (r.wpos + r.wneg) ? `<span class="pos">${r.wpos}▲</span> <span class="neg">${r.wneg}▼</span> <span class="${winPct(r) >= 0.5 ? 'pos' : 'neg'}">${Math.round(winPct(r) * 100)}%</span>` : 'no wars'}</span></div>
+      <span class="net">${rankBadge(r)}</span></div>
       <div class="bb-muted">Lv ${r.lv == null ? '?' : r.lv} • ${esc(r.p || '')}</div>${tags}
       <div class="meta">Active ${r.la ? fmtHrs(r.ih) + ' ago' : '–'}${r.it ? ' • inactive 24h+ <b>' + r.it + '×</b>' : ''} • ${r.dn == null ? 'Donator ?' : r.dn ? '✔ ' + esc(r.dt || 'Donator') : '✘ No Donator'} •
       Xanax ${r.xr == null ? 'pending' : fmtN(r.xr, 1) + '/day' + (r.xd && r.xd > 1.5 ? ' (' + fmtN(r.xd, 1) + 'd avg)' : '')} •
@@ -956,10 +970,12 @@
     h += `<div class="bb-sum">${box('all', main.length)}${box('fl', cnt('fl'), 1)}${box('A', cnt('A'), 1)}${box('D', cnt('D'), 1)}
       ${box('X', cnt('X'), 1)}${box('W', cnt('W'), 1)}${box('pd', cnt('pd'))}${box('ul', under.length)}</div>`;
     h += `<div class="bb-muted" style="margin-bottom:8px">Flagged = meets fewer than ${(snap.rules && snap.rules.need) || 3} of 4 criteria.
-      ${snap.wars && snap.wars.length ? 'Ranked by % of wars with more respect gained than lost (last ' + snap.wars.length + ' ranked war' + (snap.wars.length > 1 ? 's' : '') + '); ties go to whoever fought more wars. Null wars don\'t count.' : (snap.rules && snap.rules.cW ? 'No completed ranked war found yet.' : '')} Tap a name for details.</div>`;
+      ${snap.wars && snap.wars.length ? 'Ranked by ' + RANKS[rankBy].blurb + ', over the last ' + snap.wars.length + ' ranked war' + (snap.wars.length > 1 ? 's' : '') + '. Ties go to whoever fought more wars.' : (snap.rules && snap.rules.cW ? 'No completed ranked war found yet.' : '')} Tap a name for details.</div>`;
 
     // win % of counted (non-null) wars; ties go to whoever fought more wars, then net respect
-    const sorted = (list) => list.slice().sort((a, b) => winPct(b) - winPct(a) || warsCounted(b) - warsCounted(a) || netOf(b) - netOf(a) || a.met - b.met);
+    const rk = (RANKS[rankBy] || RANKS.win).key;
+    const sorted = (list) => list.slice().sort((a, b) => rk(b) - rk(a) || warsCounted(b) - warsCounted(a) || netOf(b) - netOf(a) || a.met - b.met);
+    if (filter !== 'ul' && filter !== 'A') h += `<div class="bb-row"><span class="bb-muted">Rank by:</span>${Object.keys(RANKS).map((k) => `<span class="bb-chip ${rankBy === k ? 'on' : ''}" data-r="${k}">${RANKS[k].label}</span>`).join('')}</div>`;
     if (filter === 'ul') {
       h += `<div class="bb-sec">Under level ${minLv} (${under.length}) — not judged</div>`;
       h += under.length ? under.map((r) => card(r)).join('') : '<p class="bb-muted">Nobody under level ' + minLv + '.</p>';
@@ -1127,6 +1143,7 @@
     if (t.dataset.t) { tab = t.dataset.t; statusText = ''; return render(); }
     const fb = t.closest('[data-f]');
     if (fb) { filter = fb.dataset.f; const b = document.getElementById('bb-body'); render(); if (b) { const sec = b.querySelector('.bb-sec'); if (sec) b.scrollTop = Math.max(0, sec.offsetTop - 60); } return; }
+    if (t.dataset.r) { rankBy = t.dataset.r; S.set('rankBy', rankBy); return render(); }
     if (t.dataset.p != null && t.classList.contains('bb-chip')) { period = Number(t.dataset.p); return render(); }
     if (t.dataset.s) { if (sortKey === t.dataset.s) sortDir *= -1; else { sortKey = t.dataset.s; sortDir = t.dataset.s === 'name' ? 1 : -1; } return render(); }
     const tm = t.closest('[data-m]');
