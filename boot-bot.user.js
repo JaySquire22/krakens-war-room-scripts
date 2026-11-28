@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Boot Bot
 // @namespace    kraken.bootbot
-// @version      1.1.0
+// @version      1.1.1
 // @description  Daily faction member viability scan for Torn: activity, Donator status, Xanax use and ranked war respect. Notifications plus a history log for analysis.
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/*
@@ -28,7 +28,7 @@
 (function () {
   'use strict';
 
-  const VERSION = '1.1.0';
+  const VERSION = '1.1.1';
   const PREFIX = 'bootbot_';
   const TAB_ID = Math.random().toString(36).slice(2);
   const API_GAP_MS = 1100;          // ~55 calls/min, leaves headroom for War Room on the same key
@@ -526,11 +526,13 @@
         const d = await fetchMemberDetail(m.id);
         let rate = null;
         if (d.xan != null) {
-          rate = xanaxRate(m.id, d.xan, ts, log, Number(c.xanaxWindowDays) || 1);
-          if (!rate && c.checkXanax) {
-            const pastTs = ts - (Number(c.xanaxWindowDays) || 1) * 86400;
+          const win = Number(c.xanaxWindowDays) || 1;
+          rate = xanaxRate(m.id, d.xan, ts, log, win);
+          // the log only helps once it covers the whole window; until then ask Torn for the history
+          if (c.checkXanax && (!rate || rate.days < win * 0.8)) {
+            const pastTs = ts - win * 86400;
             const old = await fetchHistoricXan(m.id, pastTs);
-            if (old != null) rate = { rate: (d.xan - old) / ((ts - pastTs) / 86400), days: (ts - pastTs) / 86400, src: 'hist' };
+            if (old != null) rate = { rate: (d.xan - old) / win, days: win, src: 'hist' };
           }
         }
         st.details[m.id] = { xan: d.xan, don: d.don, rate };
@@ -576,12 +578,14 @@
       const d = st.details[mem.id] || {};
       const joined = mem.daysInFaction != null ? ts - mem.daysInFaction * 86400 : 0;
       const inactiveH = mem.lastAction ? (ts - mem.lastAction) / 3600 : null;
-      let wg = 0, wl = 0, wh = 0, wd = 0, wi = 0, wp = 0;
+      let wg = 0, wl = 0, wh = 0, wd = 0, wi = 0, wp = 0, wpos = 0, wneg = 0, wnull = 0;
       for (const w of wars) {
         if (joined > w.war.end) continue;
         wi++;
         const r = w.per[mem.id];
         if (r) { wg += r.g; wl += r.l; wh += r.h; wd += r.d; if (r.h > 0) wp++; }
+        const wn = r ? Math.round((r.g - r.l) * 100) / 100 : 0;
+        if (wn > 0) wpos++; else if (wn < 0) wneg++; else wnull++;
       }
       const wj = allWars.filter((w) => w.end >= joined).length;
       const f = [];
@@ -604,7 +608,7 @@
         la: mem.lastAction, ih: inactiveH == null ? null : Math.round(inactiveH * 10) / 10,
         dn: d.don ? (d.don.is ? 1 : 0) : null, dt: d.don ? d.don.type : '',
         x: d.xan, xr: d.rate ? Math.round(d.rate.rate * 100) / 100 : null, xd: d.rate ? Math.round(d.rate.days * 10) / 10 : null, xs: d.rate ? d.rate.src : '',
-        wg: Math.round(wg * 100) / 100, wl: Math.round(wl * 100) / 100, wh, wd, wi, wp, wj,
+        wg: Math.round(wg * 100) / 100, wl: Math.round(wl * 100) / 100, wh, wd, wi, wp, wj, wpos, wneg, wnull,
         it: tallyOf(mem.id),
         f, pd: pend, met, fl, ul, ex,
       };
@@ -702,7 +706,7 @@
   function snapCSV(snaps) {
     const head = ['Scan date (TCT)', 'Member', 'ID', 'Position', 'Level', 'Under level', 'Days in faction', 'Last action (TCT)', 'Inactive hrs', 'Times inactive 24h+',
       'Donator', 'Donator type', 'Xanax total', 'Xanax/day', 'Xanax window days',
-      'War respect gained', 'War respect lost', 'War net', 'War hits', 'Wars measured', 'Wars fought in', 'Wars since joining',
+      'War respect gained', 'War respect lost', 'War net', 'Wars positive', 'Wars negative', 'Wars null', 'War hits', 'Wars measured', 'Wars fought in', 'Wars since joining',
       'Criteria met', 'Failed', 'Flagged', 'Exempt'];
     const rows = [head];
     for (const s0 of snaps) {
@@ -711,7 +715,7 @@
         const r = s.m[id];
         rows.push([fmtDT(s.ts), r.n, id, r.p, r.lv, r.ul ? 'Yes' : '', r.dif, r.la ? fmtDT(r.la) : '', r.ih, r.it == null ? '' : r.it,
           r.dn == null ? '?' : r.dn ? 'Yes' : 'No', r.dt, r.x, r.xr, r.xd,
-          r.wg, r.wl, Math.round((r.wg - r.wl) * 100) / 100, r.wh, r.wi, r.wp == null ? '' : r.wp, r.wj == null ? '' : r.wj,
+          r.wg, r.wl, Math.round((r.wg - r.wl) * 100) / 100, r.wpos == null ? '' : r.wpos, r.wneg == null ? '' : r.wneg, r.wnull == null ? '' : r.wnull, r.wh, r.wi, r.wp == null ? '' : r.wp, r.wj == null ? '' : r.wj,
           r.met, r.f.map((c) => REASON[c]).join('; '), r.fl ? 'Yes' : '', r.ex ? 'Yes' : '']);
       }
     }
@@ -913,18 +917,17 @@
 
   function card(r, rank) {
     const cls = r.ul ? 'ul' : r.fl ? 'fl' : r.f.length ? 'warn' : '';
-    const net = netOf(r);
     const tags = (r.fl ? `<span class="bb-tag fl">FLAGGED — meets ${r.met}/4</span>` : '') +
       r.f.map((c) => `<span class="bb-tag">${esc(reasonText(r, c))}</span>`).join('') +
       r.pd.map((c) => `<span class="bb-tag p">${c === 'X' ? 'Xanax: baseline (needs tomorrow)' : 'Donator: unknown'}</span>`).join('') +
       (r.ex ? '<span class="bb-tag ok">Exempt</span>' : '') + (!r.f.length && !r.pd.length && !r.ex && !r.ul ? '<span class="bb-tag ok">Meets all 4</span>' : '');
     return `<div class="bb-card ${cls}"><div class="top">${rank ? `<span class="rk">#${rank}</span>` : ''}<span class="nm" data-m="${r.id}">${esc(r.n)}</span>
       <a href="https://www.torn.com/profiles.php?XID=${r.id}" style="color:#8a93a3;font-size:11px">[${r.id}]</a>
-      <span class="net ${net > 0 ? 'pos' : net < 0 ? 'neg' : ''}">${r.wi ? (net > 0 ? '+' : '') + fmtN(net, 1) + ' net' : 'no wars'}</span></div>
+      <span class="net">${r.wpos == null ? (r.wi ? '' : 'no wars') : (r.wpos + r.wneg) ? `<span class="pos">${r.wpos}▲</span> <span class="neg">${r.wneg}▼</span>` : 'no wars'}</span></div>
       <div class="bb-muted">Lv ${r.lv == null ? '?' : r.lv} • ${esc(r.p || '')}</div>${tags}
       <div class="meta">Active ${r.la ? fmtHrs(r.ih) + ' ago' : '–'}${r.it ? ' • inactive 24h+ <b>' + r.it + '×</b>' : ''} • ${r.dn == null ? 'Donator ?' : r.dn ? '✔ ' + esc(r.dt || 'Donator') : '✘ No Donator'} •
       Xanax ${r.xr == null ? 'pending' : fmtN(r.xr, 1) + '/day' + (r.xd && r.xd > 1.5 ? ' (' + fmtN(r.xd, 1) + 'd avg)' : '')} •
-      Wars ${r.wi ? '+' + fmtN(r.wg, 1) + ' / −' + fmtN(r.wl, 1) + ' over ' + r.wi + ' (fought in ' + (r.wp == null ? '?' : r.wp) + ')' : 'none since joining'}</div></div>`;
+      Wars ${r.wpos == null ? (r.wi ? r.wi + ' measured' : 'none since joining') : (r.wpos + r.wneg) ? r.wpos + ' positive, ' + r.wneg + ' negative' + (r.wnull ? ', ' + r.wnull + ' null' : '') : (r.wi ? r.wi + ' null' : 'none since joining')}</div></div>`;
   }
 
   function renderReport(log) {
@@ -951,7 +954,7 @@
     h += `<div class="bb-sum">${box('all', main.length)}${box('fl', cnt('fl'), 1)}${box('A', cnt('A'), 1)}${box('D', cnt('D'), 1)}
       ${box('X', cnt('X'), 1)}${box('W', cnt('W'), 1)}${box('pd', cnt('pd'))}${box('ul', under.length)}</div>`;
     h += `<div class="bb-muted" style="margin-bottom:8px">Flagged = meets fewer than ${(snap.rules && snap.rules.need) || 3} of 4 criteria.
-      ${snap.wars && snap.wars.length ? 'War respect is cumulative over the last ' + snap.wars.length + ' ranked war' + (snap.wars.length > 1 ? 's' : '') + '.' : (snap.rules && snap.rules.cW ? 'No completed ranked war found yet.' : '')} Tap a name for details.</div>`;
+      ${snap.wars && snap.wars.length ? 'Ranked by cumulative war respect (gained − lost) over the last ' + snap.wars.length + ' ranked war' + (snap.wars.length > 1 ? 's' : '') + '; ▲/▼ = wars won/lost on respect.' : (snap.rules && snap.rules.cW ? 'No completed ranked war found yet.' : '')} Tap a name for details.</div>`;
 
     const sorted = (list) => list.slice().sort((a, b) => netOf(b) - netOf(a) || (b.wg || 0) - (a.wg || 0) || a.met - b.met);
     if (filter === 'ul') {
@@ -1036,15 +1039,15 @@
     const joined = now.dif != null ? (snap ? snap.ts : nowS()) - now.dif * 86400 : 0;
     const wars = Object.keys(cache).filter((k) => k.startsWith(fid + ':')).map((k) => cache[k])
       .filter((w) => w.war.end >= joined).sort((a, b) => b.war.end - a.war.end);
-    let tg = 0, tl = 0, th = 0;
+    let tg = 0, tl = 0, th = 0, np = 0, nn = 0, nz = 0;
     const warRows = wars.map((w) => {
       const x = w.per[id] || { g: 0, l: 0, h: 0, d: 0 };
       tg += x.g; tl += x.l; th += x.h;
-      const n = x.g - x.l;
+      const n = Math.round((x.g - x.l) * 100) / 100;
+      if (n > 0) np++; else if (n < 0) nn++; else nz++;
       return `<tr><td>${tctDay(w.war.end)}</td><td>${esc(w.war.enemyName)}</td><td class="n">${x.h}</td><td class="n">${fmtN(x.g, 1)}</td><td class="n">${fmtN(x.l, 1)}</td>
-        <td class="n ${n > 0 ? 'pos' : n < 0 ? 'neg' : ''}">${n > 0 ? '+' : ''}${fmtN(n, 1)}</td></tr>`;
+        <td class="n ${n > 0 ? 'pos' : n < 0 ? 'neg' : 'bb-muted'}">${n === 0 ? 'Null' : (n > 0 ? '+' : '') + fmtN(n, 1)}</td></tr>`;
     }).join('');
-    const fought = wars.filter((w) => w.per[id] && w.per[id].h > 0).length;
     const tnet = tg - tl;
     const eps = ((KV.get('inactive', {})[id] || {}).eps || []).slice().sort((a, b) => b - a);
 
@@ -1053,11 +1056,11 @@
       <div style="margin:6px 0">${now.fl ? `<span class="bb-tag fl">FLAGGED — meets ${now.met}/4</span>` : now.ul ? '' : `<span class="bb-tag ok">Meets ${now.met}/4</span>`}${now.f.map((c) => `<span class="bb-tag">${esc(reasonText(now, c))}</span>`).join('')}</div>
 
       <div class="bb-h">Ranked war performance</div>
-      <div class="bb-kv"><div><b>${now.wj == null ? wars.length : now.wj}</b>Wars since joining</div><div><b>${fought}/${wars.length}</b>Fought in (measured)</div><div><b>${th}</b>War hits</div>
+      <div class="bb-kv"><div><b>${now.wj == null ? wars.length : now.wj}</b>Wars since joining</div><div><b><span class="pos">${np}▲</span> <span class="neg">${nn}▼</span></b>${nz} null</div><div><b>${th}</b>War hits</div>
         <div><b class="pos">+${fmtN(tg, 1)}</b>Respect gained</div><div><b class="neg">−${fmtN(tl, 1)}</b>Respect lost</div><div><b class="${tnet > 0 ? 'pos' : tnet < 0 ? 'neg' : ''}">${tnet > 0 ? '+' : ''}${fmtN(tnet, 1)}</b>Net</div></div>`;
     h += wars.length
       ? `<table class="bb-tbl"><tr><th>Ended</th><th>Enemy</th><th>Hits</th><th>Gained</th><th>Lost</th><th>Net</th></tr>${warRows}</table>
-         <div class="bb-muted" style="margin-top:4px">Lost = respect the enemy took hitting this member.</div>`
+         <div class="bb-muted" style="margin-top:4px">▲ = gained more than lost in that war, ▼ = lost more. Null = no respect gained or lost (not counted). Lost = respect the enemy took hitting this member.</div>`
       : '<p class="bb-muted">No measured ranked wars since joining.</p>';
 
     h += `<div class="bb-h">Inactive over ${cfg().inactiveHours}h — ${eps.length} time${eps.length === 1 ? '' : 's'}</div>`;
@@ -1097,7 +1100,7 @@
       <div class="bb-set"><label>Activity<small>Fails if not active for more than X hours</small></label>${num('inactiveHours', c.inactiveHours, 1, 720)}${sw('checkActive', c.checkActive)}</div>
       <div class="bb-set"><label>Donator status<small>Donator pack or subscription</small></label>${sw('checkDonator', c.checkDonator)}</div>
       <div class="bb-set"><label>Xanax per day (minimum)</label>${num('minXanaxPerDay', c.minXanaxPerDay, 0, 10, 0.5)}${sw('checkXanax', c.checkXanax)}</div>
-      <div class="bb-set"><label>Xanax measured over (days)<small>1 = last day; e.g. 7 = weekly average</small></label>${num('xanaxWindowDays', c.xanaxWindowDays, 1, 30)}</div>
+      <div class="bb-set"><label>Xanax measured over (days)<small>Average per day over this many days, from Torn's own history (up to 90)</small></label>${num('xanaxWindowDays', c.xanaxWindowDays, 1, 90)}</div>
       <div class="bb-set"><label>Ranked wars: gained &gt; lost<small>Cumulative over the last N ranked wars (max 50)</small></label>${num('warHistory', c.warHistory, 1, 50)}${sw('checkWars', c.checkWars)}</div>
       <div class="bb-set" style="display:block"><label>Exempt member IDs<small>Comma separated — shown but never flagged</small></label>
         <input type="text" class="wide" data-k="exemptIds" value="${esc(c.exemptIds)}" placeholder="e.g. 3616083, 1234567"></div>
