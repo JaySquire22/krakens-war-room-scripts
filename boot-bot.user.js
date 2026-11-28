@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Boot Bot
 // @namespace    kraken.bootbot
-// @version      1.1.9
+// @version      1.2.0
 // @description  Daily faction member viability scan for Torn: activity, Donator status, Xanax use and ranked war respect. Notifications plus a history log for analysis.
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/*
@@ -28,7 +28,7 @@
 (function () {
   'use strict';
 
-  const VERSION = '1.1.9';
+  const VERSION = '1.2.0';
   const PREFIX = 'bootbot_';
   const TAB_ID = Math.random().toString(36).slice(2);
   const API_GAP_MS = 1100;          // ~55 calls/min, leaves headroom for War Room on the same key
@@ -254,16 +254,20 @@
     return { xan, don, od };
   }
 
-  let histUnsupported = false;
+  // History lookups can fail for one member (e.g. no stats that far back) without meaning
+  // history is broken for everyone, so only give up after a long run of failures.
+  let histUnsupported = false, histFailRun = 0, histStats = {};
   async function fetchHistoricXan(id, ts) {
     if (histUnsupported) return null;
     try {
       const j = await api('v2/user/' + id + '/personalstats?stat=xantaken,overdosed&timestamp=' + ts);
       const x = parseXan(j);
-      return x == null ? null : { x, od: parseOD(j) };
+      if (x == null) { histFailRun++; return null; }
+      histFailRun = 0;
+      return { x, od: parseOD(j) };
     } catch (e) {
       if (e.code === 2) throw e;
-      if ([6, 7, 16, 23].includes(e.code)) histUnsupported = true;
+      if (++histFailRun >= 25) histUnsupported = true;
       return null;
     }
   }
@@ -504,7 +508,7 @@
     if (lockedByOther()) { setStatus('Another Torn tab is scanning…'); return; }
     const c = cfg();
     if (!c.apiKey) { setStatus('Set the faction API key in Settings first.'); return; }
-    scanning = true; heartbeat(); histUnsupported = false;
+    scanning = true; heartbeat(); histUnsupported = false; histFailRun = 0; histStats = {};
     onApiWait = (ms) => setStatus('Torn API busy — waiting ' + Math.round(ms / 1000) + 's…');
     refreshIcon();
     try {
@@ -541,10 +545,19 @@
         if (d.xan != null) {
           const win = Number(c.xanaxWindowDays) || 1;
           let base = xanaxRate(m.id, d.xan, ts, log, win);
-          // the log only helps once it covers the whole window; until then ask Torn for the history
+          // the log only helps once it covers the whole window; until then ask Torn for the history.
+          // If Torn can't go back the full window for someone, step down (60, 30, 14, 7, 3, 1 days)
+          // and average over the longest stretch it can give.
           if (c.checkXanax && (!base || base.days < win * 0.8)) {
-            const old = await fetchHistoricXan(m.id, ts - win * 86400);
-            if (old != null) base = { days: win, x0: old.x, od0: old.od, src: 'hist' };
+            const tries = [win, 60, 30, 14, 7, 3, 1].filter((dd, i, a) => dd <= win && a.indexOf(dd) === i);
+            for (const dd of tries) {
+              if (base && base.days >= dd * 0.8) break; // the log already covers this much
+              const hs = histStats[dd] || (histStats[dd] = { ok: 0, fail: 0 });
+              if (!hs.ok && hs.fail >= 4) continue;     // this length isn't working for anyone this scan
+              const old = await fetchHistoricXan(m.id, ts - dd * 86400);
+              if (old != null) { hs.ok++; base = { days: dd, x0: old.x, od0: old.od, src: 'hist' }; break; }
+              hs.fail++;
+            }
           }
           if (base) {
             // each overdose in the window takes a day out of the time measured
