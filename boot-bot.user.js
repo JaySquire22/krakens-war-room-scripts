@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Boot Bot
 // @namespace    kraken.bootbot
-// @version      1.1.4
+// @version      1.1.5
 // @description  Daily faction member viability scan for Torn: activity, Donator status, Xanax use and ranked war respect. Notifications plus a history log for analysis.
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/*
@@ -28,7 +28,7 @@
 (function () {
   'use strict';
 
-  const VERSION = '1.1.4';
+  const VERSION = '1.1.5';
   const PREFIX = 'bootbot_';
   const TAB_ID = Math.random().toString(36).slice(2);
   const API_GAP_MS = 1100;          // ~55 calls/min, leaves headroom for War Room on the same key
@@ -707,7 +707,7 @@
   function snapCSV(snaps) {
     const head = ['Scan date (TCT)', 'Member', 'ID', 'Position', 'Level', 'Under level', 'Days in faction', 'Last action (TCT)', 'Inactive hrs', 'Times inactive 24h+',
       'Donator', 'Donator type', 'Xanax total', 'Xanax/day', 'Xanax window days',
-      'War respect gained', 'War respect lost', 'War net', 'Wars positive', 'Wars negative', 'Wars null', 'Avg war %', 'Wars in avg', 'War hits', 'Wars measured', 'Wars fought in', 'Wars since joining',
+      'War respect gained', 'War respect lost', 'War net', 'Wars positive', 'Wars negative', 'Wars null', 'Avg war % vs break-even', 'Wars in avg', 'War hits', 'Wars measured', 'Wars fought in', 'Wars since joining',
       'Criteria met', 'Failed', 'Flagged', 'Exempt'];
     const rows = [head];
     for (const s0 of snaps) {
@@ -716,7 +716,7 @@
         const r = s.m[id];
         rows.push([fmtDT(s.ts), r.n, id, r.p, r.lv, r.ul ? 'Yes' : '', r.dif, r.la ? fmtDT(r.la) : '', r.ih, r.it == null ? '' : r.it,
           r.dn == null ? '?' : r.dn ? 'Yes' : 'No', r.dt, r.x, r.xr, r.xd,
-          r.wg, r.wl, Math.round((r.wg - r.wl) * 100) / 100, r.wpos == null ? '' : r.wpos, r.wneg == null ? '' : r.wneg, r.wnull == null ? '' : r.wnull, r.wav == null ? '' : Math.round(r.wav * 1000) / 10, r.wavn == null ? '' : r.wavn, r.wh, r.wi, r.wp == null ? '' : r.wp, r.wj == null ? '' : r.wj,
+          r.wg, r.wl, Math.round((r.wg - r.wl) * 100) / 100, r.wpos == null ? '' : r.wpos, r.wneg == null ? '' : r.wneg, r.wnull == null ? '' : r.wnull, r.wav == null ? '' : Math.round((r.wav - 0.5) * 1000) / 10, r.wavn == null ? '' : r.wavn, r.wh, r.wi, r.wp == null ? '' : r.wp, r.wj == null ? '' : r.wj,
           r.met, r.f.map((c) => REASON[c]).join('; '), r.fl ? 'Yes' : '', r.ex ? 'Yes' : '']);
       }
     }
@@ -932,16 +932,18 @@
   const winPct = (r) => (warsCounted(r) ? r.wpos / warsCounted(r) : -1);
   // average of each war's gained ÷ (gained + lost); wars with no respect either way are left out
   const avgPct = (r) => (r.wav == null ? -1 : r.wav);
+  // shown relative to the 50% break-even line: 65% → +15%, 40% → −10%
+  const midPct = (p) => { const v = Math.round((p - 0.5) * 1000) / 10; return (v > 0 ? '+' : v < 0 ? '−' : '±') + fmtN(Math.abs(v), 1) + '%'; };
   const avgWars = (r) => (r.wavn || 0);
   const RANKS = {
     win: { label: 'Wars won %', key: winPct, blurb: '% of wars with more respect gained than lost (null wars don\'t count)' },
-    resp: { label: 'Avg war %', key: avgPct, blurb: 'average war performance % — each war\'s respect gained ÷ (gained + lost), averaged (null wars don\'t count)' },
+    resp: { label: 'Avg war %', key: avgPct, blurb: 'average war performance — each war\'s gained ÷ (gained + lost), averaged and shown above/below the 50% break-even line (null wars don\'t count)' },
     net: { label: 'Net respect', key: netOf, blurb: 'total respect gained minus lost' },
   };
   function rankBadge(r) {
     if (!r.wi) return 'no wars';
     if (rankBy === 'net') { const n = netOf(r); return `<span class="${n > 0 ? 'pos' : n < 0 ? 'neg' : ''}">${n > 0 ? '+' : ''}${fmtN(n, 1)} net</span>`; }
-    if (rankBy === 'resp') { if (r.wav === undefined) return 'rescan'; const p = avgPct(r); return p < 0 ? 'no wars' : `<span class="${p >= 0.5 ? 'pos' : 'neg'}">${fmtN(p * 100, 1)}%</span> <span class="bb-muted">avg of ${avgWars(r)}</span>`; }
+    if (rankBy === 'resp') { if (r.wav === undefined) return 'rescan'; const p = avgPct(r); return p < 0 ? 'no wars' : `<span class="${p > 0.5 ? 'pos' : p < 0.5 ? 'neg' : ''}">${midPct(p)}</span> <span class="bb-muted">avg of ${avgWars(r)}</span>`; }
     if (r.wpos == null) return '';
     return warsCounted(r) ? `<span class="pos">${r.wpos}▲</span> <span class="neg">${r.wneg}▼</span> <span class="${winPct(r) >= 0.5 ? 'pos' : 'neg'}">${Math.round(winPct(r) * 100)}%</span>` : 'no wars';
   }
@@ -1092,7 +1094,7 @@
       const wp = x.g + x.l > 0 ? x.g / (x.g + x.l) : null;
       if (wp != null) { ps += wp; pn++; }
       return `<tr><td>${tctDay(w.war.end)}</td><td>${esc(w.war.enemyName)}</td><td class="n">${x.h}</td><td class="n">${fmtN(x.g, 1)}</td><td class="n">${fmtN(x.l, 1)}</td>
-        <td class="n ${wp == null ? 'bb-muted' : wp >= 0.5 ? 'pos' : 'neg'}">${wp == null ? 'Null' : fmtN(wp * 100, 1) + '%'}</td>
+        <td class="n ${wp == null ? 'bb-muted' : wp > 0.5 ? 'pos' : wp < 0.5 ? 'neg' : ''}">${wp == null ? 'Null' : midPct(wp)}</td>
         <td class="n ${n > 0 ? 'pos' : n < 0 ? 'neg' : 'bb-muted'}">${n === 0 ? 'Null' : (n > 0 ? '+' : '') + fmtN(n, 1)}</td></tr>`;
     }).join('');
     const tnet = tg - tl;
@@ -1103,11 +1105,11 @@
       <div style="margin:6px 0">${now.fl ? `<span class="bb-tag fl">FLAGGED — meets ${now.met}/4</span>` : now.ul ? '' : `<span class="bb-tag ok">Meets ${now.met}/4</span>`}${now.f.map((c) => `<span class="bb-tag">${esc(reasonText(now, c))}</span>`).join('')}</div>
 
       <div class="bb-h">Ranked war performance</div>
-      <div class="bb-kv"><div><b class="${pn && ps / pn >= 0.5 ? 'pos' : pn ? 'neg' : ''}">${pn ? fmtN((ps / pn) * 100, 1) + '%' : '–'}</b>Avg war % (${pn} wars)</div><div><b>${now.wj == null ? wars.length : now.wj}</b>Wars since joining</div><div><b><span class="pos">${np}▲</span> <span class="neg">${nn}▼</span></b>${nz} null</div><div><b>${th}</b>War hits</div>
+      <div class="bb-kv"><div><b class="${pn && ps / pn > 0.5 ? 'pos' : pn && ps / pn < 0.5 ? 'neg' : ''}">${pn ? midPct(ps / pn) : '–'}</b>Avg war % (${pn} wars)</div><div><b>${now.wj == null ? wars.length : now.wj}</b>Wars since joining</div><div><b><span class="pos">${np}▲</span> <span class="neg">${nn}▼</span></b>${nz} null</div><div><b>${th}</b>War hits</div>
         <div><b class="pos">+${fmtN(tg, 1)}</b>Respect gained</div><div><b class="neg">−${fmtN(tl, 1)}</b>Respect lost</div><div><b class="${tnet > 0 ? 'pos' : tnet < 0 ? 'neg' : ''}">${tnet > 0 ? '+' : ''}${fmtN(tnet, 1)}</b>Net</div></div>`;
     h += wars.length
       ? `<table class="bb-tbl"><tr><th>Ended</th><th>Enemy</th><th>Hits</th><th>Gained</th><th>Lost</th><th>War %</th><th>Net</th></tr>${warRows}</table>
-         <div class="bb-muted" style="margin-top:4px">War % = gained ÷ (gained + lost) for that war; Avg war % is the average of those. ▲ = gained more than lost in that war, ▼ = lost more. Null = no respect gained or lost (not counted). Lost = respect the enemy took hitting this member.</div>`
+         <div class="bb-muted" style="margin-top:4px">War % = how far that war's gained ÷ (gained + lost) sits above or below the 50% break-even line (0% = gained the same as lost); Avg war % is the average of those. ▲ = gained more than lost in that war, ▼ = lost more. Null = no respect gained or lost (not counted). Lost = respect the enemy took hitting this member.</div>`
       : '<p class="bb-muted">No measured ranked wars since joining.</p>';
 
     h += `<div class="bb-h">Inactive over ${cfg().inactiveHours}h — ${eps.length} time${eps.length === 1 ? '' : 's'}</div>`;
