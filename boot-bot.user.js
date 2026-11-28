@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Boot Bot
 // @namespace    kraken.bootbot
-// @version      1.0.2
+// @version      1.1.0
 // @description  Daily faction member viability scan for Torn: activity, Donator status, Xanax use and ranked war respect. Notifications plus a history log for analysis.
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/*
@@ -28,7 +28,7 @@
 (function () {
   'use strict';
 
-  const VERSION = '1.0.2';
+  const VERSION = '1.1.0';
   const PREFIX = 'bootbot_';
   const TAB_ID = Math.random().toString(36).slice(2);
   const API_GAP_MS = 1100;          // ~55 calls/min, leaves headroom for War Room on the same key
@@ -59,7 +59,10 @@
     minXanaxPerDay: 2,
     xanaxWindowDays: 1,      // 1 = last day; higher = average over N days
     checkWars: true,
-    warsToCheck: 1,          // most recent completed ranked wars to judge on
+    warHistory: 10,          // most recent completed ranked wars used for cumulative war respect
+    minCriteria: 3,          // flag anyone meeting fewer than this many of the 4 criteria
+    minLevel: 15,            // members below this level are listed separately, not judged
+    activitySampling: true,  // hourly activity check while Torn is open (catches more 24h+ absences)
     exemptIds: '',
     notifyToast: true,
     notifyBrowser: true,
@@ -268,9 +271,9 @@
     }).filter((w) => w.id && w.start);
   }
 
-  async function fetchRecentWars(factionId, n) {
+  async function fetchWarList(factionId) {
     let wars = [];
-    try { wars = normaliseWars(await api('v2/faction/rankedwars?limit=20&sort=DESC')); } catch (e) { if (e.code === 2) throw e; }
+    try { wars = normaliseWars(await api('v2/faction/rankedwars?limit=100&sort=DESC')); } catch (e) { if (e.code === 2) throw e; }
     if (!wars.length) {
       try { wars = normaliseWars(await api('faction/?selections=rankedwars')); } catch (e) { if (e.code === 2) throw e; }
     }
@@ -278,7 +281,6 @@
     return wars
       .filter((w) => w.end && w.end < t)
       .sort((a, b) => b.end - a.end)
-      .slice(0, n)
       .map((w) => {
         const enemy = w.factions.find((f) => f.id !== factionId) || {};
         return { id: w.id, start: w.start, end: w.end, enemyId: enemy.id, enemyName: enemy.name || ('Faction ' + enemy.id) };
@@ -328,33 +330,16 @@
     return per;
   }
 
-  async function getWarResults(factionId, n, status) {
-    const wars = await fetchRecentWars(factionId, n);
-    const cache = S.get('warCache', {});
-    const results = [];
-    for (const w of wars) {
-      const ck = factionId + ':' + w.id;
-      if (!cache[ck]) {
-        status && status('War vs ' + w.enemyName + ': fetching attacks…');
-        const attacks = await fetchAttacks(w.start, w.end, (c) => status && status('War vs ' + w.enemyName + ': ' + c + ' attacks…'));
-        cache[ck] = { war: w, per: aggregateWar(attacks, factionId, w.enemyId), count: attacks.length };
-        const keys = Object.keys(cache);
-        if (keys.length > 15) keys.sort((a, b) => cache[a].war.end - cache[b].war.end).slice(0, keys.length - 15).forEach((k) => delete cache[k]);
-        S.set('warCache', cache);
-      }
-      results.push(cache[ck]);
-    }
-    return results;
-  }
-
-  // ───────────────────────── log ─────────────────────────
-  // The log lives in IndexedDB: Torn's localStorage is shared with Torn and other scripts and can be full.
+  // ───────────────────────── persistent store ─────────────────────────
+  // Everything bigger than a setting lives in IndexedDB: Torn's localStorage is shared with
+  // Torn and other scripts and is often full.
   const IDB = {
     db: null,
     open() {
       if (this.db) return Promise.resolve(true);
       return new Promise((res) => {
         try {
+          if (!window.indexedDB) return res(false);
           const r = indexedDB.open('bootbot', 1);
           r.onupgradeneeded = () => r.result.createObjectStore('kv');
           r.onsuccess = () => { this.db = r.result; res(true); };
@@ -383,34 +368,64 @@
       });
     },
   };
-  let LOG = null;
-  async function loadLog() {
-    await IDB.open();
-    let l = await IDB.get('log');
-    if (!Array.isArray(l)) l = [];
-    const old = S.get('log', null); // migrate anything saved by v1.0.0/1.0.1
+
+  const KV = {
+    mem: {},
+    async load(keys) {
+      const ok = await IDB.open();
+      for (const k of keys) {
+        let v = ok ? await IDB.get(k) : undefined;
+        if (v === undefined) v = S.get('kv_' + k, null);
+        this.mem[k] = v === undefined ? null : v;
+      }
+    },
+    get(k, d) { const v = this.mem[k]; return v == null ? d : v; },
+    async set(k, v) {
+      this.mem[k] = v;
+      if (await IDB.put(k, v)) return true;
+      return S.set('kv_' + k, v);
+    },
+  };
+
+  async function loadStore() {
+    await KV.load(['log', 'warCache', 'warList', 'scanState', 'inactive']);
+    // migrate data saved by v1.0.x in localStorage
+    const old = S.get('log', null);
     if (Array.isArray(old) && old.length) {
+      const l = KV.get('log', []).slice();
       const have = new Set(l.map((x) => x.ts));
       old.forEach((x) => { if (!have.has(x.ts)) l.push(x); });
       l.sort((a, b) => a.ts - b.ts);
-      if (await IDB.put('log', l)) S.del('log');
+      if (await KV.set('log', l)) S.del('log');
     }
-    LOG = l;
-    return l;
+    S.del('warCache'); S.del('scanState');
   }
-  const getLog = () => LOG || S.get('log', []);
+
+  const getLog = () => KV.get('log', []);
   async function saveLog(log) {
     const keepAfter = nowS() - cfg().logDays * 86400;
     log = log.filter((x) => x.ts >= keepAfter).slice(-400);
-    LOG = log;
-    if (await IDB.put('log', log)) return true;
-    let l = log;
-    while (l.length) {
-      if (S.set('log', l)) return true;
-      if (l.length <= 1) break;
-      l = l.slice(Math.ceil(l.length * 0.25));
+    return KV.set('log', log);
+  }
+
+  async function getWarHistory(factionId, n, status) {
+    const list = await fetchWarList(factionId);
+    await KV.set('warList', { fid: factionId, list: list.map((w) => ({ id: w.id, start: w.start, end: w.end, enemy: w.enemyName })) });
+    const use = list.slice(0, n);
+    const cache = Object.assign({}, KV.get('warCache', {}));
+    for (let i = 0; i < use.length; i++) {
+      const w = use[i];
+      const ck = factionId + ':' + w.id;
+      if (cache[ck]) continue;
+      const label = 'War ' + (i + 1) + '/' + use.length + ' vs ' + w.enemyName;
+      status && status(label + ': fetching attacks…');
+      const attacks = await fetchAttacks(w.start, w.end, (c) => status && status(label + ': ' + c + ' attacks…'));
+      cache[ck] = { war: w, per: aggregateWar(attacks, factionId, w.enemyId), count: attacks.length };
+      const keys = Object.keys(cache);
+      if (keys.length > 60) keys.sort((a, b) => cache[a].war.end - cache[b].war.end).slice(0, keys.length - 60).forEach((k) => delete cache[k]);
+      await KV.set('warCache', cache);
     }
-    return false;
+    return use.map((w) => w.id);
   }
 
   function xanaxRate(id, xanNow, ts, log, windowDays) {
@@ -426,6 +441,36 @@
     const days = (ts - best.ts) / 86400;
     return { rate: (xanNow - best.x) / days, days, src: 'log' };
   }
+
+  // ───────────────────────── activity tally ─────────────────────────
+  // Each time a member is seen inactive past the limit counts once (one absence = one tally,
+  // however long it lasts). Hourly sampling while Torn is open catches absences between scans.
+  let lastSampleMem = 0;
+  async function recordActivity(members) {
+    const c = cfg(); const ts = nowS(); const lim = Number(c.inactiveHours) * 3600;
+    const inact = Object.assign({}, KV.get('inactive', {}));
+    let changed = false;
+    for (const m of members) {
+      if (!m.lastAction || ts - m.lastAction <= lim) continue;
+      const e = inact[m.id] ? Object.assign({}, inact[m.id]) : { n: m.name, eps: [] };
+      e.n = m.name;
+      e.eps = e.eps.slice();
+      // same absence = same last-action time (allow a few seconds of drift)
+      if (!e.eps.some((t) => Math.abs(t - m.lastAction) < 60)) { e.eps.push(m.lastAction); if (e.eps.length > 300) e.eps.shift(); changed = true; }
+      inact[m.id] = e;
+    }
+    lastSampleMem = Date.now(); S.set('lastSample', lastSampleMem);
+    if (changed) await KV.set('inactive', inact);
+  }
+  async function maybeSampleActivity() {
+    const c = cfg();
+    if (!c.activitySampling || !c.apiKey || scanning || lockedByOther()) return;
+    const last = Math.max(lastSampleMem, S.get('lastSample', 0));
+    if (Date.now() - last < 60 * 60 * 1000) return;
+    lastSampleMem = Date.now();
+    try { await recordActivity(await fetchMembers()); } catch (e) { console.warn('[Boot Bot] activity sample failed', e); }
+  }
+  const tallyOf = (id) => { const e = KV.get('inactive', {})[id]; return e ? e.eps.length : 0; };
 
   // ───────────────────────── scan ─────────────────────────
   let scanning = false;
@@ -450,27 +495,29 @@
     onApiWait = (ms) => setStatus('Torn API busy — waiting ' + Math.round(ms / 1000) + 's…');
     refreshIcon();
     try {
-      let st = S.get('scanState', null);
-      if (!st || Date.now() - st.started > RESUME_MS) {
+      await KV.load(['scanState', 'log', 'warCache', 'inactive']); // another tab may have moved things on
+      let st = KV.get('scanState', null);
+      if (!st || st.v !== 2 || Date.now() - st.started > RESUME_MS) {
         setStatus('Loading faction…');
         const b = await api('v2/faction/basic');
         const basic = b.basic || b;
         S.set('faction', { id: basic.id, name: basic.name });
         setStatus('Loading members…');
         const members = await fetchMembers();
-        let wars = [];
-        if (c.checkWars) wars = await getWarResults(Number(basic.id), Math.max(1, Number(c.warsToCheck) || 1), setStatus);
-        st = {
-          started: Date.now(), manual: !!manual, factionId: Number(basic.id), factionName: basic.name,
-          members, wars: wars.map((w) => ({ id: w.war.id, start: w.war.start, end: w.war.end, enemyName: w.war.enemyName, per: w.per })),
-          details: {},
-        };
-        S.set('scanState', st);
+        await recordActivity(members);
+        st = { v: 2, started: Date.now(), manual: !!manual, factionId: Number(basic.id), factionName: basic.name, members, details: {}, warIds: [], warsDone: false };
+        await KV.set('scanState', st);
       } else {
         setStatus('Resuming scan…');
       }
 
-      const log = (await loadLog()).slice();
+      if (!st.warsDone) {
+        if (c.checkWars) st.warIds = await getWarHistory(st.factionId, Math.min(50, Math.max(1, Number(c.warHistory) || 10)), setStatus);
+        st.warsDone = true;
+        await KV.set('scanState', st);
+      }
+
+      const log = getLog().slice();
       const ts = nowS();
       const todo = st.members.filter((m) => !st.details[m.id]);
       let done = st.members.length - todo.length;
@@ -487,7 +534,7 @@
           }
         }
         st.details[m.id] = { xan: d.xan, don: d.don, rate };
-        S.set('scanState', st);
+        await KV.set('scanState', st);
         done++;
         refreshIcon(Math.round((done / st.members.length) * 100));
         if (panelOpen() && tab === 'report' && Date.now() - lastLiveRender > 2500) { lastLiveRender = Date.now(); render(); }
@@ -496,12 +543,12 @@
       const snap = buildSnapshot(st, ts);
       const prev = log.length ? log[log.length - 1] : null;
       log.push(snap);
-      S.del('scanState');
+      await KV.set('scanState', null);
       const saved = await saveLog(log);
       S.set('lastAutoDay', tctDay(ts)); // a manual scan also counts as today's scan
-      setStatus('Scan complete — ' + snap.flagged + ' flagged of ' + snap.count + '.' + (saved ? '' : ' ⚠ Could not save to the log on this device (storage full) — results shown for this session only.'));
+      setStatus('Scan complete — ' + snap.flagged + ' flagged of ' + snap.judged + '.' + (saved ? '' : ' ⚠ Could not save to the log on this device — results shown for this session only.'));
       await notify(snap, prev);
-      S.set('viewTs', snap.ts);
+      S.del('viewTs');
       if (panelOpen()) render();
     } catch (e) {
       console.error('[Boot Bot]', e);
@@ -514,51 +561,76 @@
     }
   }
 
+  const CRIT = ['A', 'D', 'X', 'W'];
   function buildSnapshot(st, ts) {
     const c = cfg();
     const exempt = exemptSet();
+    const cache = KV.get('warCache', {});
+    const wars = (st.warIds || []).map((id) => cache[st.factionId + ':' + id]).filter(Boolean);
+    const allWars = (KV.get('warList', { list: [] }).list) || [];
+    const minLv = Number(c.minLevel) || 0;
+    const need = Math.min(4, Math.max(1, Number(c.minCriteria) || 3));
     const m = {};
-    let flagged = 0;
+    let flagged = 0, judged = 0;
     for (const mem of st.members) {
       const d = st.details[mem.id] || {};
       const joined = mem.daysInFaction != null ? ts - mem.daysInFaction * 86400 : 0;
       const inactiveH = mem.lastAction ? (ts - mem.lastAction) / 3600 : null;
-      // wars this member was in the faction for
-      let wg = 0, wl = 0, wh = 0, wd = 0, wIn = 0;
-      for (const w of st.wars) {
-        if (joined > w.end) continue;
-        wIn++;
+      let wg = 0, wl = 0, wh = 0, wd = 0, wi = 0, wp = 0;
+      for (const w of wars) {
+        if (joined > w.war.end) continue;
+        wi++;
         const r = w.per[mem.id];
-        if (r) { wg += r.g; wl += r.l; wh += r.h; wd += r.d; }
+        if (r) { wg += r.g; wl += r.l; wh += r.h; wd += r.d; if (r.h > 0) wp++; }
       }
+      const wj = allWars.filter((w) => w.end >= joined).length;
       const f = [];
       const pend = [];
-      if (!exempt.has(mem.id)) {
-        if (c.checkActive && inactiveH != null && inactiveH > Number(c.inactiveHours)) f.push('A');
-        if (c.checkDonator) { if (d.don == null) pend.push('D'); else if (!d.don.is) f.push('D'); }
-        if (c.checkXanax) {
-          if (!d.rate) pend.push('X');
-          else if (d.rate.rate + 1e-9 < Number(c.minXanaxPerDay)) f.push('X');
-        }
-        if (c.checkWars && wIn > 0 && !(wg > wl)) f.push('W');
+      if (c.checkActive && inactiveH != null && inactiveH > Number(c.inactiveHours)) f.push('A');
+      if (c.checkDonator) { if (d.don == null) pend.push('D'); else if (!d.don.is) f.push('D'); }
+      if (c.checkXanax) {
+        if (!d.rate) pend.push('X');
+        else if (d.rate.rate + 1e-9 < Number(c.minXanaxPerDay)) f.push('X');
       }
-      if (f.length) flagged++;
+      if (c.checkWars && wi > 0 && !(wg > wl)) f.push('W');
+      const ul = mem.level != null && mem.level < minLv ? 1 : 0;
+      const ex = exempt.has(mem.id) ? 1 : 0;
+      const met = CRIT.length - f.length; // disabled or not-yet-known criteria count as met
+      const fl = !ul && !ex && met < need ? 1 : 0;
+      if (!ul) judged++;
+      if (fl) flagged++;
       m[mem.id] = {
         n: mem.name, lv: mem.level, p: mem.position, dif: mem.daysInFaction,
         la: mem.lastAction, ih: inactiveH == null ? null : Math.round(inactiveH * 10) / 10,
         dn: d.don ? (d.don.is ? 1 : 0) : null, dt: d.don ? d.don.type : '',
         x: d.xan, xr: d.rate ? Math.round(d.rate.rate * 100) / 100 : null, xd: d.rate ? Math.round(d.rate.days * 10) / 10 : null, xs: d.rate ? d.rate.src : '',
-        wg: Math.round(wg * 100) / 100, wl: Math.round(wl * 100) / 100, wh, wd, wi: wIn,
-        f, pd: pend, ex: exempt.has(mem.id) ? 1 : 0,
+        wg: Math.round(wg * 100) / 100, wl: Math.round(wl * 100) / 100, wh, wd, wi, wp, wj,
+        it: tallyOf(mem.id),
+        f, pd: pend, met, fl, ul, ex,
       };
     }
     return {
-      ts, day: tctDay(ts), manual: !!st.manual, fid: st.factionId, fname: st.factionName,
-      count: st.members.length, flagged,
-      wars: st.wars.map((w) => ({ id: w.id, end: w.end, enemy: w.enemyName })),
-      rules: { ih: c.inactiveHours, mx: c.minXanaxPerDay, xw: c.xanaxWindowDays, cA: c.checkActive, cD: c.checkDonator, cX: c.checkXanax, cW: c.checkWars },
+      v: 2, ts, day: tctDay(ts), manual: !!st.manual, fid: st.factionId, fname: st.factionName,
+      count: st.members.length, judged, flagged,
+      wars: wars.map((w) => ({ id: w.war.id, end: w.war.end, enemy: w.war.enemyName })),
+      rules: { ih: c.inactiveHours, mx: c.minXanaxPerDay, xw: c.xanaxWindowDays, need, minLv, cA: c.checkActive, cD: c.checkDonator, cX: c.checkXanax, cW: c.checkWars },
       m,
     };
+  }
+
+  // v1.0.x snapshots don't have the newer fields; fill them so old scans still display
+  function normSnap(s) {
+    if (!s || s.v === 2) return s;
+    for (const id of Object.keys(s.m)) {
+      const r = s.m[id];
+      if (r.met == null) r.met = CRIT.length - r.f.length;
+      if (r.fl == null) r.fl = r.f.length >= 2 ? 1 : 0;
+      if (r.ul == null) r.ul = r.lv != null && r.lv < (Number(cfg().minLevel) || 0) ? 1 : 0;
+    }
+    if (s.judged == null) s.judged = Object.values(s.m).filter((r) => !r.ul).length;
+    s.flagged = Object.values(s.m).filter((r) => r.fl).length;
+    s.v = 2;
+    return s;
   }
 
   // ───────────────────────── notifications ─────────────────────────
@@ -573,9 +645,9 @@
 
   async function notify(snap, prev) {
     const c = cfg();
-    const flaggedIds = Object.keys(snap.m).filter((id) => snap.m[id].f.length);
-    const newIds = flaggedIds.filter((id) => !(prev && prev.m && prev.m[id] && prev.m[id].f && prev.m[id].f.length));
-    const msg = flaggedIds.length + ' of ' + snap.count + ' members flagged' + (prev ? ' (' + newIds.length + ' new)' : '');
+    const flaggedIds = Object.keys(snap.m).filter((id) => snap.m[id].fl);
+    const newIds = flaggedIds.filter((id) => !(prev && prev.m && prev.m[id] && (prev.m[id].fl != null ? prev.m[id].fl : prev.m[id].f.length >= 2)));
+    const msg = flaggedIds.length + ' of ' + snap.judged + ' members flagged' + (prev ? ' (' + newIds.length + ' new)' : '');
     if (c.notifyToast) toast('👢 Boot Bot: ' + msg, 8000);
     if (c.notifyBrowser && flaggedIds.length) {
       try {
@@ -587,9 +659,9 @@
       const ids = c.discordOnlyNew ? newIds : flaggedIds;
       if (ids.length || !c.discordOnlyNew) {
         const lines = ids
-          .map((id) => snap.m[id])
-          .sort((a, b) => b.f.length - a.f.length)
-          .map((r) => '• **' + r.n + '** [' + Object.keys(snap.m).find((k) => snap.m[k] === r) + '] — ' + r.f.map((code) => reasonText(r, code)).join(', '));
+          .map((id) => Object.assign({ id }, snap.m[id]))
+          .sort((a, b) => a.met - b.met)
+          .map((r) => '• **' + r.n + '** [' + r.id + '] — meets ' + r.met + '/4 — ' + r.f.map((code) => reasonText(r, code)).join(', '));
         const head = '👢 **Boot Bot — ' + (snap.fname || 'Faction') + ' daily scan ' + snap.day + '**\n' + msg + '\n';
         await postDiscord(c.discordWebhook, head, lines);
       }
@@ -628,15 +700,19 @@
   // ───────────────────────── export ─────────────────────────
   function csvCell(v) { const s = v == null ? '' : String(v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; }
   function snapCSV(snaps) {
-    const head = ['Scan date (TCT)', 'Member', 'ID', 'Position', 'Level', 'Days in faction', 'Last action (TCT)', 'Inactive hrs',
-      'Donator', 'Donator type', 'Xanax total', 'Xanax/day', 'Xanax window days', 'War respect gained', 'War respect lost', 'War hits', 'Wars counted',
-      'Flags', 'Flag count', 'Exempt'];
+    const head = ['Scan date (TCT)', 'Member', 'ID', 'Position', 'Level', 'Under level', 'Days in faction', 'Last action (TCT)', 'Inactive hrs', 'Times inactive 24h+',
+      'Donator', 'Donator type', 'Xanax total', 'Xanax/day', 'Xanax window days',
+      'War respect gained', 'War respect lost', 'War net', 'War hits', 'Wars measured', 'Wars fought in', 'Wars since joining',
+      'Criteria met', 'Failed', 'Flagged', 'Exempt'];
     const rows = [head];
-    for (const s of snaps) {
+    for (const s0 of snaps) {
+      const s = normSnap(s0);
       for (const id of Object.keys(s.m)) {
         const r = s.m[id];
-        rows.push([fmtDT(s.ts), r.n, id, r.p, r.lv, r.dif, r.la ? fmtDT(r.la) : '', r.ih, r.dn == null ? '?' : r.dn ? 'Yes' : 'No', r.dt,
-          r.x, r.xr, r.xd, r.wg, r.wl, r.wh, r.wi, r.f.map((c) => REASON[c]).join('; '), r.f.length, r.ex ? 'Yes' : '']);
+        rows.push([fmtDT(s.ts), r.n, id, r.p, r.lv, r.ul ? 'Yes' : '', r.dif, r.la ? fmtDT(r.la) : '', r.ih, r.it == null ? '' : r.it,
+          r.dn == null ? '?' : r.dn ? 'Yes' : 'No', r.dt, r.x, r.xr, r.xd,
+          r.wg, r.wl, Math.round((r.wg - r.wl) * 100) / 100, r.wh, r.wi, r.wp == null ? '' : r.wp, r.wj == null ? '' : r.wj,
+          r.met, r.f.map((c) => REASON[c]).join('; '), r.fl ? 'Yes' : '', r.ex ? 'Yes' : '']);
       }
     }
     return rows.map((r) => r.map(csvCell).join(',')).join('\n');
@@ -693,13 +769,21 @@
   .bb-chip{padding:4px 9px;border-radius:12px;background:#232a36;border:1px solid #39424f;cursor:pointer;font-size:12px}
   .bb-chip.on{background:#c0392b;border-color:#c0392b;color:#fff}
   .bb-sum{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:10px}
-  .bb-sum div{background:#1b212b;border-radius:6px;padding:7px;text-align:center}.bb-sum b{display:block;font-size:16px}
+  .bb-box{background:#1b212b;border:1px solid #1b212b;border-radius:6px;padding:7px 4px;text-align:center;cursor:pointer;font-size:11px;color:#9aa4b4}
+  .bb-box b{display:block;font-size:17px;color:#fff}
+  .bb-box.on{border-color:#c0392b;background:#2a1a1a;color:#fff}
+  .bb-box.red b{color:#ff8a7a}
+  .bb-sec{font-weight:bold;color:#fff;margin:4px 0 8px;font-size:14px}
   .bb-card{background:#1b212b;border-left:4px solid #27ae60;border-radius:6px;padding:8px 10px;margin-bottom:6px}
-  .bb-card.f1{border-left-color:#f1c40f}.bb-card.f2{border-left-color:#e67e22}.bb-card.f3{border-left-color:#c0392b}
+  .bb-card.fl{border-left-color:#c0392b;background:#221a1d}.bb-card.warn{border-left-color:#e67e22}.bb-card.ul{border-left-color:#5d6d7e}
+  .bb-card .top{display:flex;gap:6px;align-items:baseline}
+  .bb-card .rk{color:#8a93a3;font-weight:bold;min-width:26px}
   .bb-card .nm{font-weight:bold;color:#fff;cursor:pointer;text-decoration:underline dotted}
+  .bb-card .net{margin-left:auto;font-weight:bold;white-space:nowrap}
+  .pos{color:#58d68d}.neg{color:#ff8a7a}
   .bb-card .meta{color:#8a93a3;font-size:12px;margin-top:3px;line-height:1.5}
   .bb-tag{display:inline-block;font-size:11px;padding:1px 6px;border-radius:4px;margin:3px 4px 0 0;background:#5a1d17;color:#ffb3a8}
-  .bb-tag.p{background:#2f3a4a;color:#b9c7d8}.bb-tag.ok{background:#1d4a2e;color:#a9e8bf}
+  .bb-tag.p{background:#2f3a4a;color:#b9c7d8}.bb-tag.ok{background:#1d4a2e;color:#a9e8bf}.bb-tag.fl{background:#c0392b;color:#fff;font-weight:bold}
   .bb-tbl{width:100%;border-collapse:collapse;font-size:12px}.bb-tbl th,.bb-tbl td{padding:5px 4px;border-bottom:1px solid #262d38;text-align:left}
   .bb-tbl th{color:#8a93a3;cursor:pointer;position:sticky;top:-10px;background:#14181f}.bb-tbl td.n{text-align:right}
   .bb-tbl tr.click{cursor:pointer}.bb-tbl tr.click:hover{background:#1b212b}
@@ -713,13 +797,15 @@
   .bb-sw input:checked+span{background:#1e8449}.bb-sw input:checked+span:before{transform:translateX(20px)}
   .bb-h{font-weight:bold;color:#c0392b;margin:12px 0 4px;text-transform:uppercase;font-size:11px;letter-spacing:.5px}
   #bb-modal{position:absolute;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;border-radius:10px}
-  #bb-modal>div{background:#14181f;border:1px solid #39424f;border-radius:8px;width:94%;max-height:90%;overflow:auto;padding:12px}
+  #bb-modal>div{background:#14181f;border:1px solid #39424f;border-radius:8px;width:96%;max-height:92%;overflow:auto;padding:12px}
+  .bb-kv{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:6px 0 10px}
+  .bb-kv div{background:#1b212b;border-radius:6px;padding:6px;text-align:center;font-size:11px;color:#9aa4b4}.bb-kv b{display:block;font-size:15px;color:#fff}
   .bb-toast{position:fixed;z-index:1000000;left:50%;bottom:70px;transform:translateX(-50%);background:#0d1015;color:#fff;border:1px solid #c0392b;
     padding:10px 14px;border-radius:8px;font:13px Arial;box-shadow:0 4px 14px rgba(0,0,0,.6);max-width:90vw}
   .bb-muted{color:#8a93a3;font-size:12px}
   `;
 
-  let tab = 'report', filter = 'flagged', statusText = '', sortKey = 'flag', sortDir = -1, period = 30;
+  let tab = 'report', filter = 'all', statusText = '', sortKey = 'flag', sortDir = -1, period = 30;
 
   function toast(msg, ms) {
     const t = document.createElement('div'); t.className = 'bb-toast'; t.textContent = msg; document.body.appendChild(t);
@@ -767,7 +853,7 @@
 
   function refreshIcon(pct) {
     const ic = document.getElementById('bb-icon'); if (!ic) return;
-    const log = getLog(); const last = log[log.length - 1];
+    const log = getLog(); const last = normSnap(log[log.length - 1]);
     const b = ic.querySelector('.bb-badge'), p = ic.querySelector('.bb-prog');
     if (last && last.flagged) { b.style.display = ''; b.textContent = last.flagged; } else b.style.display = 'none';
     if (scanning) { p.style.display = ''; p.textContent = pct != null ? pct + '%' : '…'; } else p.style.display = 'none';
@@ -786,7 +872,7 @@
     p.addEventListener('click', onClick);
     p.addEventListener('change', onChange);
     render();
-    loadLog().then(() => { if (panelOpen()) render(); refreshIcon(); });
+    loadStore().then(() => { if (panelOpen()) render(); refreshIcon(); });
   }
   function closePanel() { const p = document.getElementById('bb-panel'); if (p) p.remove(); }
 
@@ -798,82 +884,113 @@
     const lastSnap = log[log.length - 1];
     if (!statusText && saved && Date.now() - saved.ts < 12 * 3600 * 1000 && (!lastSnap || saved.ts > lastSnap.ts * 1000 - 60000)) statusText = saved.t;
     if (!statusText) {
-      const last = log[log.length - 1];
-      statusText = cfg().apiKey ? (last ? 'Last scan ' + fmtDT(last.ts) + (cfg().autoScan ? ' • auto-scan daily after ' + String(cfg().scanHourTCT).padStart(2, '0') + ':00 TCT' : '') : 'No scans yet — tap Scan now.') : 'Set up the faction API key in Settings.';
+      statusText = cfg().apiKey ? (lastSnap ? 'Last scan ' + fmtDT(lastSnap.ts) + (cfg().autoScan ? ' • auto-scan daily after ' + String(cfg().scanHourTCT).padStart(2, '0') + ':00 TCT' : '') : 'No scans yet — tap Scan now.') : 'Set up the faction API key in Settings.';
     }
     setStatus(statusText);
     const body = p.querySelector('#bb-body');
+    const keepScroll = body.scrollTop;
     if (tab === 'report') body.innerHTML = renderReport(log);
     else if (tab === 'log') body.innerHTML = renderLog(log);
     else body.innerHTML = renderSettings();
+    body.scrollTop = keepScroll;
   }
 
   function currentSnap(log) {
     const v = S.get('viewTs', null);
-    return (v && log.find((s) => s.ts === v)) || log[log.length - 1] || null;
+    return normSnap((v && log.find((s) => s.ts === v)) || log[log.length - 1] || null);
+  }
+
+  const netOf = (r) => (r.wg || 0) - (r.wl || 0);
+  const FILTERS = {
+    all: { label: 'Overview', test: () => true },
+    fl: { label: 'Flagged', test: (r) => r.fl },
+    A: { label: 'Inactive', test: (r) => r.f.includes('A') },
+    D: { label: 'No Donator', test: (r) => r.f.includes('D') },
+    X: { label: 'Low Xanax', test: (r) => r.f.includes('X') },
+    W: { label: 'War −', test: (r) => r.f.includes('W') },
+    pd: { label: 'Pending', test: (r) => r.pd.length > 0 },
+  };
+
+  function card(r, rank) {
+    const cls = r.ul ? 'ul' : r.fl ? 'fl' : r.f.length ? 'warn' : '';
+    const net = netOf(r);
+    const tags = (r.fl ? `<span class="bb-tag fl">FLAGGED — meets ${r.met}/4</span>` : '') +
+      r.f.map((c) => `<span class="bb-tag">${esc(reasonText(r, c))}</span>`).join('') +
+      r.pd.map((c) => `<span class="bb-tag p">${c === 'X' ? 'Xanax: baseline (needs tomorrow)' : 'Donator: unknown'}</span>`).join('') +
+      (r.ex ? '<span class="bb-tag ok">Exempt</span>' : '') + (!r.f.length && !r.pd.length && !r.ex && !r.ul ? '<span class="bb-tag ok">Meets all 4</span>' : '');
+    return `<div class="bb-card ${cls}"><div class="top">${rank ? `<span class="rk">#${rank}</span>` : ''}<span class="nm" data-m="${r.id}">${esc(r.n)}</span>
+      <a href="https://www.torn.com/profiles.php?XID=${r.id}" style="color:#8a93a3;font-size:11px">[${r.id}]</a>
+      <span class="net ${net > 0 ? 'pos' : net < 0 ? 'neg' : ''}">${r.wi ? (net > 0 ? '+' : '') + fmtN(net, 1) + ' net' : 'no wars'}</span></div>
+      <div class="bb-muted">Lv ${r.lv == null ? '?' : r.lv} • ${esc(r.p || '')}</div>${tags}
+      <div class="meta">Active ${r.la ? fmtHrs(r.ih) + ' ago' : '–'}${r.it ? ' • inactive 24h+ <b>' + r.it + '×</b>' : ''} • ${r.dn == null ? 'Donator ?' : r.dn ? '✔ ' + esc(r.dt || 'Donator') : '✘ No Donator'} •
+      Xanax ${r.xr == null ? 'pending' : fmtN(r.xr, 1) + '/day' + (r.xd && r.xd > 1.5 ? ' (' + fmtN(r.xd, 1) + 'd avg)' : '')} •
+      Wars ${r.wi ? '+' + fmtN(r.wg, 1) + ' / −' + fmtN(r.wl, 1) + ' over ' + r.wi + ' (fought in ' + (r.wp == null ? '?' : r.wp) + ')' : 'none since joining'}</div></div>`;
   }
 
   function renderReport(log) {
     const snap = currentSnap(log);
     let h = `<div class="bb-row"><button class="bb-btn red" data-a="scan" ${scanning ? 'disabled' : ''}>${scanning ? 'Scanning…' : 'Scan now'}</button>
       ${snap ? '<button class="bb-btn" data-a="exportSnap">Export CSV</button>' : ''}</div>`;
-    const prog = S.get('scanState', null);
+    const prog = KV.get('scanState', null);
     if (prog && prog.members) {
       const n = prog.members.length, d = Object.keys(prog.details || {}).length, pc = n ? Math.round((d / n) * 100) : 0;
       h += `<div style="background:#1b212b;border-radius:6px;padding:8px 10px;margin-bottom:10px"><b>${scanning ? 'Scan in progress' : 'Scan paused — resumes automatically'}</b>
-        <div class="bb-muted">${d} of ${n} members checked (${pc}%). You can keep playing — it carries on across pages.</div>
+        <div class="bb-muted">${prog.warsDone ? d + ' of ' + n + ' members checked (' + pc + '%)' : 'Loading war history…'}. You can keep playing — it carries on across pages.</div>
         <div style="height:6px;background:#0d1015;border-radius:3px;margin-top:6px"><div style="height:6px;width:${pc}%;background:#c0392b;border-radius:3px"></div></div></div>`;
     }
-    if (!snap) return h + '<p class="bb-muted">No scan yet. Boot Bot scans once a day automatically, or tap Scan now. The first scan takes a few minutes (about 1–2 API calls per member).</p>';
-    const ids = Object.keys(snap.m);
-    const rows = ids.map((id) => Object.assign({ id }, snap.m[id]));
-    const cnt = (code) => rows.filter((r) => r.f.includes(code)).length;
-    const isLatest = snap === log[log.length - 1];
-    h += `<div class="bb-muted" style="margin-bottom:6px">${esc(snap.fname)} • ${fmtDT(snap.ts)}${snap.manual ? ' (manual)' : ''}${isLatest ? '' : ' • <a href="#" data-a="latest" style="color:#e67e22">viewing old scan — show latest</a>'}</div>
-      <div class="bb-sum"><div><b>${snap.flagged}</b>Flagged</div><div><b>${cnt('A')}</b>Inactive</div><div><b>${cnt('D')}</b>No Donator</div><div><b>${cnt('X')}</b>Low Xanax</div></div>
-      <div class="bb-sum" style="grid-template-columns:repeat(3,1fr)"><div><b>${cnt('W')}</b>War −</div><div><b>${rows.filter((r) => r.f.length >= 2).length}</b>2+ fails</div><div><b>${snap.count - snap.flagged}</b>Clear</div></div>`;
-    if (snap.wars && snap.wars.length) h += `<div class="bb-muted" style="margin-bottom:8px">War criterion: ${snap.wars.map((w) => 'vs ' + esc(w.enemy) + ' (ended ' + tctDay(w.end) + ')').join(', ')}</div>`;
-    else if (snap.rules.cW) h += '<div class="bb-muted" style="margin-bottom:8px">No completed ranked war found — war criterion skipped.</div>';
-    h += `<div class="bb-row">${['flagged', 'all', 'clear', 'pending'].map((f) => `<span class="bb-chip ${filter === f ? 'on' : ''}" data-f="${f}">${f[0].toUpperCase() + f.slice(1)}</span>`).join('')}</div>`;
-    let list = rows;
-    if (filter === 'flagged') list = rows.filter((r) => r.f.length);
-    if (filter === 'clear') list = rows.filter((r) => !r.f.length && !r.pd.length);
-    if (filter === 'pending') list = rows.filter((r) => r.pd.length);
-    list.sort((a, b) => b.f.length - a.f.length || (b.ih || 0) - (a.ih || 0));
-    if (!list.length) h += '<p class="bb-muted">Nobody in this view.</p>';
-    for (const r of list) {
-      const cls = r.f.length >= 3 ? 'f3' : r.f.length === 2 ? 'f2' : r.f.length === 1 ? 'f1' : '';
-      const tags = r.f.map((c) => `<span class="bb-tag">${esc(reasonText(r, c))}</span>`).join('') +
-        r.pd.map((c) => `<span class="bb-tag p">${c === 'X' ? 'Xanax: baseline (needs tomorrow)' : 'Donator: unknown'}</span>`).join('') +
-        (r.ex ? '<span class="bb-tag ok">Exempt</span>' : '') + (!r.f.length && !r.pd.length && !r.ex ? '<span class="bb-tag ok">Viable</span>' : '');
-      h += `<div class="bb-card ${cls}"><span class="nm" data-m="${r.id}">${esc(r.n)}</span> <a href="https://www.torn.com/profiles.php?XID=${r.id}" style="color:#8a93a3;font-size:11px">[${r.id}]</a>
-        <span class="bb-muted"> ${esc(r.p || '')}</span><br>${tags}
-        <div class="meta">Active ${r.la ? fmtHrs(r.ih) + ' ago' : '–'} • ${r.dn == null ? 'Donator ?' : r.dn ? '✔ ' + esc(r.dt || 'Donator') : '✘ No Donator'} •
-        Xanax ${r.xr == null ? 'pending' : fmtN(r.xr, 1) + '/day' + (r.xd && r.xd > 1.5 ? ' (' + fmtN(r.xd, 1) + 'd avg)' : '')} •
-        War ${r.wi ? '+' + fmtN(r.wg, 1) + ' / −' + fmtN(r.wl, 1) + ' (' + r.wh + ' hits)' : 'n/a'}</div></div>`;
+    if (!snap) return h + '<p class="bb-muted">No scan yet. Boot Bot scans once a day automatically, or tap Scan now.</p>';
+
+    const all = Object.keys(snap.m).map((id) => Object.assign({ id }, snap.m[id]));
+    const main = all.filter((r) => !r.ul);
+    const under = all.filter((r) => r.ul).sort((a, b) => (b.lv || 0) - (a.lv || 0));
+    const isLatest = snap.ts === (log[log.length - 1] || {}).ts;
+    const minLv = (snap.rules && snap.rules.minLv) || cfg().minLevel;
+    h += `<div class="bb-muted" style="margin-bottom:6px">${esc(snap.fname)} • ${fmtDT(snap.ts)}${snap.manual ? ' (manual)' : ''}${isLatest ? '' : ' • <a href="#" data-a="latest" style="color:#e67e22">viewing old scan — show latest</a>'}</div>`;
+    const box = (key, n, red) => `<div class="bb-box ${filter === key ? 'on' : ''} ${red && n ? 'red' : ''}" data-f="${key}"><b>${n}</b>${key === 'ul' ? 'Under ' + minLv : FILTERS[key].label}</div>`;
+    const cnt = (k) => main.filter(FILTERS[k].test).length;
+    h += `<div class="bb-sum">${box('all', main.length)}${box('fl', cnt('fl'), 1)}${box('A', cnt('A'), 1)}${box('D', cnt('D'), 1)}
+      ${box('X', cnt('X'), 1)}${box('W', cnt('W'), 1)}${box('pd', cnt('pd'))}${box('ul', under.length)}</div>`;
+    h += `<div class="bb-muted" style="margin-bottom:8px">Flagged = meets fewer than ${(snap.rules && snap.rules.need) || 3} of 4 criteria.
+      ${snap.wars && snap.wars.length ? 'War respect is cumulative over the last ' + snap.wars.length + ' ranked war' + (snap.wars.length > 1 ? 's' : '') + '.' : (snap.rules && snap.rules.cW ? 'No completed ranked war found yet.' : '')} Tap a name for details.</div>`;
+
+    const sorted = (list) => list.slice().sort((a, b) => netOf(b) - netOf(a) || (b.wg || 0) - (a.wg || 0) || a.met - b.met);
+    if (filter === 'ul') {
+      h += `<div class="bb-sec">Under level ${minLv} (${under.length}) — not judged</div>`;
+      h += under.length ? under.map((r) => card(r)).join('') : '<p class="bb-muted">Nobody under level ' + minLv + '.</p>';
+      return h;
+    }
+    const f = FILTERS[filter] || FILTERS.all;
+    let list = sorted(main.filter(f.test));
+    if (filter === 'A') list = main.filter(f.test).sort((a, b) => (b.ih || 0) - (a.ih || 0));
+    h += `<div class="bb-sec">${f.label === 'Overview' ? 'Most effective first' : f.label} (${list.length})</div>`;
+    h += list.length ? list.map((r, i) => card(r, filter === 'all' ? i + 1 : (filter === 'A' ? 0 : i + 1))).join('') : '<p class="bb-muted">Nobody in this list.</p>';
+    if (filter === 'all' && under.length) {
+      h += `<div class="bb-sec" style="margin-top:16px">Under level ${minLv} (${under.length}) — not included above</div>`;
+      h += under.map((r) => card(r)).join('');
     }
     return h;
   }
 
   function memberStats(log, days) {
     const from = days ? nowS() - days * 86400 : 0;
-    const snaps = log.filter((s) => s.ts >= from);
-    const latest = log[log.length - 1];
+    const snaps = log.filter((s) => s.ts >= from).map(normSnap);
+    const latest = normSnap(log[log.length - 1]);
     const stats = {};
     for (const s of snaps) {
       for (const id of Object.keys(s.m)) {
         const r = s.m[id];
-        const o = (stats[id] = stats[id] || { id, n: r.n, scans: 0, flagged: 0, A: 0, D: 0, X: 0, W: 0, x0: null, t0: null, x1: null, t1: null, wg: r.wg, wl: r.wl });
-        o.n = r.n; o.scans++; if (r.f.length) o.flagged++;
+        const o = (stats[id] = stats[id] || { id, n: r.n, scans: 0, flagged: 0, A: 0, D: 0, X: 0, W: 0, x0: null, t0: null, x1: null, t1: null });
+        o.n = r.n; o.scans++; if (r.fl) o.flagged++;
         r.f.forEach((c) => o[c]++);
         if (r.x != null) { if (o.x0 == null) { o.x0 = r.x; o.t0 = s.ts; } o.x1 = r.x; o.t1 = s.ts; }
-        o.wg = r.wg; o.wl = r.wl;
+        o.net = netOf(r); o.ul = r.ul;
       }
     }
     return Object.values(stats).map((o) => {
       o.pct = o.scans ? Math.round((o.flagged / o.scans) * 100) : 0;
       o.xpd = o.x0 != null && o.t1 - o.t0 > 12 * 3600 ? (o.x1 - o.x0) / ((o.t1 - o.t0) / 86400) : null;
       o.current = !!(latest && latest.m[o.id]);
+      o.it = tallyOf(o.id);
       return o;
     });
   }
@@ -882,18 +999,21 @@
     if (!log.length) return '<p class="bb-muted">The log fills up with each daily scan. Come back after a few scans for trends.</p>';
     let h = `<div class="bb-row"><span class="bb-muted">Period:</span>${[7, 30, 90, 0].map((d) => `<span class="bb-chip ${period === d ? 'on' : ''}" data-p="${d}">${d ? d + 'd' : 'All'}</span>`).join('')}
       <button class="bb-btn" data-a="exportLog" style="margin-left:auto">Export full log</button></div>`;
-    let st = memberStats(log, period).filter((o) => o.current);
-    const keyFn = { flag: (o) => o.pct * 1000 + o.flagged, name: (o) => o.n.toLowerCase(), A: (o) => o.A, D: (o) => o.D, X: (o) => o.X, W: (o) => o.W, xpd: (o) => (o.xpd == null ? -1 : o.xpd) };
+    const st = memberStats(log, period).filter((o) => o.current && !o.ul);
+    const keyFn = { flag: (o) => o.pct * 1000 + o.flagged, name: (o) => o.n.toLowerCase(), it: (o) => o.it, D: (o) => o.D, X: (o) => o.X, net: (o) => o.net || 0, xpd: (o) => (o.xpd == null ? -1 : o.xpd) };
     const kf = keyFn[sortKey] || keyFn.flag;
     st.sort((a, b) => { const x = kf(a), y = kf(b); return (x > y ? 1 : x < y ? -1 : 0) * sortDir; });
     const th = (k, label) => `<th data-s="${k}">${label}${sortKey === k ? (sortDir > 0 ? ' ▲' : ' ▼') : ''}</th>`;
-    h += '<div class="bb-h">Current members — days flagged</div><table class="bb-tbl"><tr>' + th('name', 'Member') + th('flag', 'Flag %') + th('A', 'Inact') + th('D', 'NoDon') + th('X', 'LowX') + th('W', 'War−') + th('xpd', 'Xan/day') + '</tr>';
+    h += '<div class="bb-h">Current members — tap a column to sort</div><table class="bb-tbl"><tr>' + th('name', 'Member') + th('flag', 'Flagged') + th('it', 'Inact 24h+') + th('D', 'NoDon') + th('X', 'LowX') + th('net', 'War net') + th('xpd', 'Xan/day') + '</tr>';
     for (const o of st) {
-      h += `<tr class="click" data-m="${o.id}"><td>${esc(o.n)}</td><td class="n">${o.pct}% <span class="bb-muted">(${o.flagged}/${o.scans})</span></td><td class="n">${o.A}</td><td class="n">${o.D}</td><td class="n">${o.X}</td><td class="n">${o.W}</td><td class="n">${o.xpd == null ? '–' : fmtN(o.xpd, 1)}</td></tr>`;
+      h += `<tr class="click" data-m="${o.id}"><td>${esc(o.n)}</td><td class="n">${o.pct}% <span class="bb-muted">(${o.flagged}/${o.scans})</span></td><td class="n">${o.it}×</td><td class="n">${o.D}</td><td class="n">${o.X}</td>
+        <td class="n ${o.net > 0 ? 'pos' : o.net < 0 ? 'neg' : ''}">${fmtN(o.net, 1)}</td><td class="n">${o.xpd == null ? '–' : fmtN(o.xpd, 1)}</td></tr>`;
     }
-    h += '</table><div class="bb-h">Scan history</div><table class="bb-tbl"><tr><th>Date</th><th>Members</th><th>Flagged</th><th></th></tr>';
-    for (const s of log.slice().reverse()) {
-      h += `<tr class="click" data-v="${s.ts}"><td>${fmtDT(s.ts)}${s.manual ? ' <span class="bb-muted">manual</span>' : ''}</td><td class="n">${s.count}</td><td class="n">${s.flagged}</td><td class="n" style="color:#e67e22">View</td></tr>`;
+    h += '</table><div class="bb-muted" style="margin-top:4px">Flagged = % of scans flagged. Inact 24h+ = separate times seen inactive over 24h (all time). NoDon/LowX = scans failing that check.</div>';
+    h += '<div class="bb-h">Scan history</div><table class="bb-tbl"><tr><th>Date</th><th>Judged</th><th>Flagged</th><th></th></tr>';
+    for (const s0 of log.slice().reverse()) {
+      const s = normSnap(s0);
+      h += `<tr class="click" data-v="${s.ts}"><td>${fmtDT(s.ts)}${s.manual ? ' <span class="bb-muted">manual</span>' : ''}</td><td class="n">${s.judged}</td><td class="n">${s.flagged}</td><td class="n" style="color:#e67e22">View</td></tr>`;
     }
     const left = memberStats(log, period).filter((o) => !o.current);
     if (left.length) h += `<p class="bb-muted" style="margin-top:8px">${left.length} member(s) in this period have since left: ${left.map((o) => esc(o.n)).join(', ')}</p>`;
@@ -902,15 +1022,51 @@
 
   function showMember(id) {
     const log = getLog();
-    const rows = log.filter((s) => s.m[id]).map((s) => Object.assign({ ts: s.ts }, s.m[id])).reverse();
+    const rows = log.filter((s) => s.m[id]).map((s) => Object.assign({ ts: s.ts }, normSnap(s).m[id])).reverse();
     if (!rows.length) return;
+    const r = rows[0];
+    const snap = currentSnap(log);
+    const now = (snap && snap.m[id]) || r;
     const p = document.getElementById('bb-panel');
     const md = document.createElement('div'); md.id = 'bb-modal';
-    let h = `<div><div class="bb-row"><b style="flex:1;font-size:14px">${esc(rows[0].n)} [${id}]</b><button class="bb-btn" data-a="closeModal">Close</button></div>
-      <table class="bb-tbl"><tr><th>Date</th><th>Active</th><th>Don</th><th>Xan/day</th><th>War +/−</th><th>Flags</th></tr>`;
-    for (const r of rows) {
-      h += `<tr><td>${tctDay(r.ts)}</td><td>${fmtHrs(r.ih)}</td><td>${r.dn == null ? '?' : r.dn ? '✔' : '✘'}</td><td>${r.xr == null ? '–' : fmtN(r.xr, 1)}</td>
-        <td>${r.wi ? fmtN(r.wg, 0) + '/' + fmtN(r.wl, 0) : '–'}</td><td>${r.f.length ? r.f.map((c) => REASON[c]).join(', ') : '<span style="color:#27ae60">OK</span>'}</td></tr>`;
+
+    // war-by-war from cache
+    const cache = KV.get('warCache', {});
+    const fid = (snap && snap.fid) || (S.get('faction', {}) || {}).id;
+    const joined = now.dif != null ? (snap ? snap.ts : nowS()) - now.dif * 86400 : 0;
+    const wars = Object.keys(cache).filter((k) => k.startsWith(fid + ':')).map((k) => cache[k])
+      .filter((w) => w.war.end >= joined).sort((a, b) => b.war.end - a.war.end);
+    let tg = 0, tl = 0, th = 0;
+    const warRows = wars.map((w) => {
+      const x = w.per[id] || { g: 0, l: 0, h: 0, d: 0 };
+      tg += x.g; tl += x.l; th += x.h;
+      const n = x.g - x.l;
+      return `<tr><td>${tctDay(w.war.end)}</td><td>${esc(w.war.enemyName)}</td><td class="n">${x.h}</td><td class="n">${fmtN(x.g, 1)}</td><td class="n">${fmtN(x.l, 1)}</td>
+        <td class="n ${n > 0 ? 'pos' : n < 0 ? 'neg' : ''}">${n > 0 ? '+' : ''}${fmtN(n, 1)}</td></tr>`;
+    }).join('');
+    const fought = wars.filter((w) => w.per[id] && w.per[id].h > 0).length;
+    const tnet = tg - tl;
+    const eps = ((KV.get('inactive', {})[id] || {}).eps || []).slice().sort((a, b) => b - a);
+
+    let h = `<div><div class="bb-row"><b style="flex:1;font-size:15px">${esc(r.n)} [${id}]</b><button class="bb-btn" data-a="closeModal">Close</button></div>
+      <div class="bb-muted">Level ${now.lv == null ? '?' : now.lv} • ${esc(now.p || '')} • ${now.dif == null ? '?' : now.dif} days in faction${now.ul ? ' • under level limit (not judged)' : ''}</div>
+      <div style="margin:6px 0">${now.fl ? `<span class="bb-tag fl">FLAGGED — meets ${now.met}/4</span>` : now.ul ? '' : `<span class="bb-tag ok">Meets ${now.met}/4</span>`}${now.f.map((c) => `<span class="bb-tag">${esc(reasonText(now, c))}</span>`).join('')}</div>
+
+      <div class="bb-h">Ranked war performance</div>
+      <div class="bb-kv"><div><b>${now.wj == null ? wars.length : now.wj}</b>Wars since joining</div><div><b>${fought}/${wars.length}</b>Fought in (measured)</div><div><b>${th}</b>War hits</div>
+        <div><b class="pos">+${fmtN(tg, 1)}</b>Respect gained</div><div><b class="neg">−${fmtN(tl, 1)}</b>Respect lost</div><div><b class="${tnet > 0 ? 'pos' : tnet < 0 ? 'neg' : ''}">${tnet > 0 ? '+' : ''}${fmtN(tnet, 1)}</b>Net</div></div>`;
+    h += wars.length
+      ? `<table class="bb-tbl"><tr><th>Ended</th><th>Enemy</th><th>Hits</th><th>Gained</th><th>Lost</th><th>Net</th></tr>${warRows}</table>
+         <div class="bb-muted" style="margin-top:4px">Lost = respect the enemy took hitting this member.</div>`
+      : '<p class="bb-muted">No measured ranked wars since joining.</p>';
+
+    h += `<div class="bb-h">Inactive over ${cfg().inactiveHours}h — ${eps.length} time${eps.length === 1 ? '' : 's'}</div>`;
+    h += eps.length ? '<div class="bb-muted">Went quiet from: ' + eps.slice(0, 12).map((t) => fmtDT(t).replace(' TCT', '')).join(' • ') + (eps.length > 12 ? ' …' : '') + ' (TCT)</div>' : '<div class="bb-muted">Never seen inactive that long.</div>';
+
+    h += `<div class="bb-h">Daily scans</div><table class="bb-tbl"><tr><th>Date</th><th>Active</th><th>Don</th><th>Xan/day</th><th>Met</th><th>Failed</th></tr>`;
+    for (const x of rows) {
+      h += `<tr><td>${tctDay(x.ts)}</td><td>${fmtHrs(x.ih)}</td><td>${x.dn == null ? '?' : x.dn ? '✔' : '✘'}</td><td>${x.xr == null ? '–' : fmtN(x.xr, 1)}</td>
+        <td>${x.ul ? '–' : x.met + '/4'}</td><td>${x.f.length ? x.f.map((c) => REASON[c]).join(', ') : '<span style="color:#27ae60">None</span>'}</td></tr>`;
     }
     md.innerHTML = h + '</table></div>';
     p.appendChild(md);
@@ -921,7 +1077,7 @@
 
   function renderSettings() {
     const c = cfg(); const fac = S.get('faction', null);
-    let h = `<div class="bb-h">Faction API key</div>
+    return `<div class="bb-h">Faction API key</div>
       <div class="bb-muted" style="margin-bottom:6px">Using: <b>${maskKey(c.apiKey)}</b>${fac && c.apiKey ? ' • ' + esc(fac.name) + ' [' + fac.id + ']' : ''}</div>
       <div class="bb-row"><button class="bb-btn red" data-a="detect">Use War Room key (auto-detect)</button></div>
       <div class="bb-row"><input type="password" id="bb-key" placeholder="…or paste faction key" style="flex:1;background:#0d1015;color:#e6e6e6;border:1px solid #39424f;border-radius:5px;padding:7px">
@@ -931,13 +1087,18 @@
       <div class="bb-h">Daily scan</div>
       <div class="bb-set"><label>Auto-scan once a day<small>Runs on your first Torn page after the chosen hour</small></label>${sw('autoScan', c.autoScan)}</div>
       <div class="bb-set"><label>Scan after (TCT hour, 0–23)</label>${num('scanHourTCT', c.scanHourTCT, 0, 23)}</div>
+      <div class="bb-set"><label>Hourly activity check<small>While Torn is open — catches more 24h+ absences for the tally (1 API call/hour)</small></label>${sw('activitySampling', c.activitySampling)}</div>
+
+      <div class="bb-h">Judging</div>
+      <div class="bb-set"><label>Flag if meeting fewer than (of 4)</label>${num('minCriteria', c.minCriteria, 1, 4)}</div>
+      <div class="bb-set"><label>Minimum level<small>Members below this are listed separately and not judged</small></label>${num('minLevel', c.minLevel, 1, 100)}</div>
 
       <div class="bb-h">Criteria</div>
-      <div class="bb-set"><label>Activity<small>Flag if not active for more than X hours</small></label>${num('inactiveHours', c.inactiveHours, 1, 720)}${sw('checkActive', c.checkActive)}</div>
+      <div class="bb-set"><label>Activity<small>Fails if not active for more than X hours</small></label>${num('inactiveHours', c.inactiveHours, 1, 720)}${sw('checkActive', c.checkActive)}</div>
       <div class="bb-set"><label>Donator status<small>Donator pack or subscription</small></label>${sw('checkDonator', c.checkDonator)}</div>
       <div class="bb-set"><label>Xanax per day (minimum)</label>${num('minXanaxPerDay', c.minXanaxPerDay, 0, 10, 0.5)}${sw('checkXanax', c.checkXanax)}</div>
       <div class="bb-set"><label>Xanax measured over (days)<small>1 = last day; e.g. 7 = weekly average</small></label>${num('xanaxWindowDays', c.xanaxWindowDays, 1, 30)}</div>
-      <div class="bb-set"><label>Ranked wars: gained &gt; lost<small>Judged on the last N completed ranked wars</small></label>${num('warsToCheck', c.warsToCheck, 1, 5)}${sw('checkWars', c.checkWars)}</div>
+      <div class="bb-set"><label>Ranked wars: gained &gt; lost<small>Cumulative over the last N ranked wars (max 50)</small></label>${num('warHistory', c.warHistory, 1, 50)}${sw('checkWars', c.checkWars)}</div>
       <div class="bb-set" style="display:block"><label>Exempt member IDs<small>Comma separated — shown but never flagged</small></label>
         <input type="text" class="wide" data-k="exemptIds" value="${esc(c.exemptIds)}" placeholder="e.g. 3616083, 1234567"></div>
 
@@ -953,29 +1114,29 @@
       <div class="bb-set"><label>Keep history for (days)</label>${num('logDays', c.logDays, 7, 365)}</div>
       <div class="bb-row"><span class="bb-muted" style="flex:1">${getLog().length} scans stored</span><button class="bb-btn" data-a="clearLog">Clear log</button></div>
       <p class="bb-muted" style="margin-top:14px">Boot Bot v${VERSION} © -TheKraken- [3616083]. Not to be copied or redistributed without permission. Only contacts api.torn.com (and your Discord webhook if enabled).</p>`;
-    return h;
   }
 
   async function onClick(e) {
     const t = e.target;
     if (t.dataset.t) { tab = t.dataset.t; statusText = ''; return render(); }
-    if (t.dataset.f) { filter = t.dataset.f; return render(); }
+    const fb = t.closest('[data-f]');
+    if (fb) { filter = fb.dataset.f; const b = document.getElementById('bb-body'); render(); if (b) { const sec = b.querySelector('.bb-sec'); if (sec) b.scrollTop = Math.max(0, sec.offsetTop - 60); } return; }
     if (t.dataset.p != null && t.classList.contains('bb-chip')) { period = Number(t.dataset.p); return render(); }
     if (t.dataset.s) { if (sortKey === t.dataset.s) sortDir *= -1; else { sortKey = t.dataset.s; sortDir = t.dataset.s === 'name' ? 1 : -1; } return render(); }
-    const tr = t.closest('tr[data-m],[data-m]');
-    if (tr && tr.dataset.m) return showMember(tr.dataset.m);
+    const tm = t.closest('[data-m]');
+    if (tm && tm.dataset.m) return showMember(tm.dataset.m);
     const tv = t.closest('tr[data-v]');
-    if (tv) { S.set('viewTs', Number(tv.dataset.v)); tab = 'report'; filter = 'flagged'; return render(); }
+    if (tv) { S.set('viewTs', Number(tv.dataset.v)); tab = 'report'; filter = 'all'; return render(); }
     const a = t.dataset.a || (t.closest('[data-a]') && t.closest('[data-a]').dataset.a);
     if (!a) return;
     e.preventDefault();
     if (a === 'close') return closePanel();
     if (a === 'closeModal') { const m = document.getElementById('bb-modal'); return m && m.remove(); }
     if (a === 'latest') { S.del('viewTs'); return render(); }
-    if (a === 'scan') { S.del('viewTs'); render(); await runScan(true); return render(); }
+    if (a === 'scan') { S.del('viewTs'); S.del('scanBackoff'); render(); await runScan(true); return render(); }
     if (a === 'exportSnap') { const s = currentSnap(getLog()); return exportCSV('bootbot-' + s.day + '.csv', snapCSV([s])); }
     if (a === 'exportLog') return exportCSV('bootbot-log-' + tctDay() + '.csv', snapCSV(getLog()));
-    if (a === 'clearLog') { if (window.confirm('Delete all Boot Bot scan history on this device?')) { S.del('log'); LOG = []; await IDB.put('log', []); S.del('viewTs'); toast('Log cleared'); render(); refreshIcon(); } return; }
+    if (a === 'clearLog') { if (window.confirm('Delete all Boot Bot scan history on this device?')) { await KV.set('log', []); S.del('log'); S.del('viewTs'); toast('Log cleared'); render(); refreshIcon(); } return; }
     if (a === 'detect') {
       setStatus('Looking for the War Room key…');
       const r = await autoDetectKey(setStatus);
@@ -1015,33 +1176,36 @@
     else v = e.target.value.trim();
     saveCfg({ [k]: v });
     if (k === 'notifyBrowser' && v && !(typeof GM_notification === 'function') && window.Notification && Notification.permission === 'default') Notification.requestPermission();
-    setStatus('Saved.');
+    setStatus(k === 'warHistory' ? 'Saved — applies from the next scan.' : 'Saved — applies from the next scan.');
   }
 
   // ───────────────────────── boot ─────────────────────────
-  function tryStart() {
+  async function tryStart() {
     if (scanning || lockedByOther()) return;
     if (Date.now() < S.get('scanBackoff', 0)) return;
-    const st = S.get('scanState', null);
-    if (st && Date.now() - st.started < RESUME_MS) runScan(st.manual);
-    else if (shouldAutoScan()) runScan(false);
+    await KV.load(['scanState']);
+    const st = KV.get('scanState', null);
+    if (st && st.v === 2 && Date.now() - st.started < RESUME_MS) return runScan(st.manual);
+    if (shouldAutoScan()) return runScan(false);
+    await maybeSampleActivity();
   }
 
-  function init() {
+  async function init() {
     if (!document.body) return setTimeout(init, 300);
     buildIcon();
     // release the scan lock when leaving a page so the next page can carry on straight away
     const release = () => { if (scanning) { const l = S.get('lock', null); if (l && l.tab === TAB_ID) S.del('lock'); } };
     window.addEventListener('pagehide', release);
     window.addEventListener('beforeunload', release);
-    loadLog().then(refreshIcon);
+    await loadStore();
+    refreshIcon();
     setTimeout(tryStart, 3000);
-    setInterval(tryStart, 15000); // picks up an unfinished scan if another tab/page let go of it
+    setInterval(tryStart, 15000); // picks up an unfinished scan if another page let go of it
   }
 
   // Exposed for testing only
   if (typeof window !== 'undefined' && window.__BOOTBOT_TEST__) {
-    window.__BOOTBOT__ = { runScan, aggregateWar, xanaxRate, parseXan, parseDonator, normaliseWars, buildSnapshot, getLog, saveLog, cfg, saveCfg, candidateKeys, verifyKey, snapCSV, memberStats };
+    window.__BOOTBOT__ = { runScan, aggregateWar, xanaxRate, parseXan, parseDonator, normaliseWars, buildSnapshot, getLog, saveLog, cfg, saveCfg, candidateKeys, verifyKey, snapCSV, memberStats, KV, loadStore, recordActivity, showMember };
   }
   init();
 })();
