@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Boot Bot
 // @namespace    kraken.bootbot
-// @version      1.1.3
+// @version      1.1.4
 // @description  Daily faction member viability scan for Torn: activity, Donator status, Xanax use and ranked war respect. Notifications plus a history log for analysis.
 // @author       -TheKraken- [3616083]
 // @match        https://www.torn.com/*
@@ -28,7 +28,7 @@
 (function () {
   'use strict';
 
-  const VERSION = '1.1.3';
+  const VERSION = '1.1.4';
   const PREFIX = 'bootbot_';
   const TAB_ID = Math.random().toString(36).slice(2);
   const API_GAP_MS = 1100;          // ~55 calls/min, leaves headroom for War Room on the same key
@@ -578,7 +578,7 @@
       const d = st.details[mem.id] || {};
       const joined = mem.daysInFaction != null ? ts - mem.daysInFaction * 86400 : 0;
       const inactiveH = mem.lastAction ? (ts - mem.lastAction) / 3600 : null;
-      let wg = 0, wl = 0, wh = 0, wd = 0, wi = 0, wp = 0, wpos = 0, wneg = 0, wnull = 0;
+      let wg = 0, wl = 0, wh = 0, wd = 0, wi = 0, wp = 0, wpos = 0, wneg = 0, wnull = 0, pctSum = 0, pctN = 0;
       for (const w of wars) {
         if (joined > w.war.end) continue;
         wi++;
@@ -586,6 +586,7 @@
         if (r) { wg += r.g; wl += r.l; wh += r.h; wd += r.d; if (r.h > 0) wp++; }
         const wn = r ? Math.round((r.g - r.l) * 100) / 100 : 0;
         if (wn > 0) wpos++; else if (wn < 0) wneg++; else wnull++;
+        if (r && r.g + r.l > 0) { pctSum += r.g / (r.g + r.l); pctN++; }
       }
       const wj = allWars.filter((w) => w.end >= joined).length;
       const f = [];
@@ -608,7 +609,7 @@
         la: mem.lastAction, ih: inactiveH == null ? null : Math.round(inactiveH * 10) / 10,
         dn: d.don ? (d.don.is ? 1 : 0) : null, dt: d.don ? d.don.type : '',
         x: d.xan, xr: d.rate ? Math.round(d.rate.rate * 100) / 100 : null, xd: d.rate ? Math.round(d.rate.days * 10) / 10 : null, xs: d.rate ? d.rate.src : '',
-        wg: Math.round(wg * 100) / 100, wl: Math.round(wl * 100) / 100, wh, wd, wi, wp, wj, wpos, wneg, wnull,
+        wg: Math.round(wg * 100) / 100, wl: Math.round(wl * 100) / 100, wh, wd, wi, wp, wj, wpos, wneg, wnull, wav: pctN ? Math.round((pctSum / pctN) * 10000) / 10000 : null, wavn: pctN,
         it: tallyOf(mem.id),
         f, pd: pend, met, fl, ul, ex,
       };
@@ -706,7 +707,7 @@
   function snapCSV(snaps) {
     const head = ['Scan date (TCT)', 'Member', 'ID', 'Position', 'Level', 'Under level', 'Days in faction', 'Last action (TCT)', 'Inactive hrs', 'Times inactive 24h+',
       'Donator', 'Donator type', 'Xanax total', 'Xanax/day', 'Xanax window days',
-      'War respect gained', 'War respect lost', 'War net', 'Wars positive', 'Wars negative', 'Wars null', 'War hits', 'Wars measured', 'Wars fought in', 'Wars since joining',
+      'War respect gained', 'War respect lost', 'War net', 'Wars positive', 'Wars negative', 'Wars null', 'Avg war %', 'Wars in avg', 'War hits', 'Wars measured', 'Wars fought in', 'Wars since joining',
       'Criteria met', 'Failed', 'Flagged', 'Exempt'];
     const rows = [head];
     for (const s0 of snaps) {
@@ -715,7 +716,7 @@
         const r = s.m[id];
         rows.push([fmtDT(s.ts), r.n, id, r.p, r.lv, r.ul ? 'Yes' : '', r.dif, r.la ? fmtDT(r.la) : '', r.ih, r.it == null ? '' : r.it,
           r.dn == null ? '?' : r.dn ? 'Yes' : 'No', r.dt, r.x, r.xr, r.xd,
-          r.wg, r.wl, Math.round((r.wg - r.wl) * 100) / 100, r.wpos == null ? '' : r.wpos, r.wneg == null ? '' : r.wneg, r.wnull == null ? '' : r.wnull, r.wh, r.wi, r.wp == null ? '' : r.wp, r.wj == null ? '' : r.wj,
+          r.wg, r.wl, Math.round((r.wg - r.wl) * 100) / 100, r.wpos == null ? '' : r.wpos, r.wneg == null ? '' : r.wneg, r.wnull == null ? '' : r.wnull, r.wav == null ? '' : Math.round(r.wav * 1000) / 10, r.wavn == null ? '' : r.wavn, r.wh, r.wi, r.wp == null ? '' : r.wp, r.wj == null ? '' : r.wj,
           r.met, r.f.map((c) => REASON[c]).join('; '), r.fl ? 'Yes' : '', r.ex ? 'Yes' : '']);
       }
     }
@@ -900,24 +901,47 @@
     body.scrollTop = keepScroll;
   }
 
+  // scans made before v1.1.4 have no Avg war % — work it out from the stored war data
+  function fillWarAvg(snap) {
+    if (!snap || !snap.wars || !snap.wars.length) return snap;
+    const cache = KV.get('warCache', {});
+    const wars = snap.wars.map((w) => cache[snap.fid + ':' + w.id]).filter(Boolean);
+    if (wars.length !== snap.wars.length) return snap;
+    for (const id of Object.keys(snap.m)) {
+      const r = snap.m[id];
+      if (r.wav !== undefined) continue;
+      const joined = r.dif != null ? snap.ts - r.dif * 86400 : 0;
+      let ps = 0, pn = 0;
+      for (const w of wars) {
+        if (joined > w.war.end) continue;
+        const x = w.per[id];
+        if (x && x.g + x.l > 0) { ps += x.g / (x.g + x.l); pn++; }
+      }
+      r.wav = pn ? Math.round((ps / pn) * 10000) / 10000 : null; r.wavn = pn;
+    }
+    return snap;
+  }
+
   function currentSnap(log) {
     const v = S.get('viewTs', null);
-    return normSnap((v && log.find((s) => s.ts === v)) || log[log.length - 1] || null);
+    return fillWarAvg(normSnap((v && log.find((s) => s.ts === v)) || log[log.length - 1] || null));
   }
 
   const netOf = (r) => (r.wg || 0) - (r.wl || 0);
   const warsCounted = (r) => (r.wpos || 0) + (r.wneg || 0);
   const winPct = (r) => (warsCounted(r) ? r.wpos / warsCounted(r) : -1);
-  const respPct = (r) => ((r.wg || 0) + (r.wl || 0) > 0 ? r.wg / (r.wg + r.wl) : -1);
+  // average of each war's gained ÷ (gained + lost); wars with no respect either way are left out
+  const avgPct = (r) => (r.wav == null ? -1 : r.wav);
+  const avgWars = (r) => (r.wavn || 0);
   const RANKS = {
     win: { label: 'Wars won %', key: winPct, blurb: '% of wars with more respect gained than lost (null wars don\'t count)' },
-    resp: { label: 'Respect %', key: respPct, blurb: 'share of all war respect that was gained: gained ÷ (gained + lost)' },
+    resp: { label: 'Avg war %', key: avgPct, blurb: 'average war performance % — each war\'s respect gained ÷ (gained + lost), averaged (null wars don\'t count)' },
     net: { label: 'Net respect', key: netOf, blurb: 'total respect gained minus lost' },
   };
   function rankBadge(r) {
     if (!r.wi) return 'no wars';
     if (rankBy === 'net') { const n = netOf(r); return `<span class="${n > 0 ? 'pos' : n < 0 ? 'neg' : ''}">${n > 0 ? '+' : ''}${fmtN(n, 1)} net</span>`; }
-    if (rankBy === 'resp') { const p = respPct(r); return p < 0 ? 'no respect' : `<span class="pos">+${fmtN(r.wg, 0)}</span> <span class="neg">−${fmtN(r.wl, 0)}</span> <span class="${p >= 0.5 ? 'pos' : 'neg'}">${Math.round(p * 100)}%</span>`; }
+    if (rankBy === 'resp') { if (r.wav === undefined) return 'rescan'; const p = avgPct(r); return p < 0 ? 'no wars' : `<span class="${p >= 0.5 ? 'pos' : 'neg'}">${fmtN(p * 100, 1)}%</span> <span class="bb-muted">avg of ${avgWars(r)}</span>`; }
     if (r.wpos == null) return '';
     return warsCounted(r) ? `<span class="pos">${r.wpos}▲</span> <span class="neg">${r.wneg}▼</span> <span class="${winPct(r) >= 0.5 ? 'pos' : 'neg'}">${Math.round(winPct(r) * 100)}%</span>` : 'no wars';
   }
@@ -974,7 +998,8 @@
 
     // win % of counted (non-null) wars; ties go to whoever fought more wars, then net respect
     const rk = (RANKS[rankBy] || RANKS.win).key;
-    const sorted = (list) => list.slice().sort((a, b) => rk(b) - rk(a) || warsCounted(b) - warsCounted(a) || netOf(b) - netOf(a) || a.met - b.met);
+    const wc = rankBy === 'resp' ? avgWars : warsCounted;
+    const sorted = (list) => list.slice().sort((a, b) => rk(b) - rk(a) || wc(b) - wc(a) || netOf(b) - netOf(a) || a.met - b.met);
     if (filter !== 'ul' && filter !== 'A') h += `<div class="bb-row"><span class="bb-muted">Rank by:</span>${Object.keys(RANKS).map((k) => `<span class="bb-chip ${rankBy === k ? 'on' : ''}" data-r="${k}">${RANKS[k].label}</span>`).join('')}</div>`;
     if (filter === 'ul') {
       h += `<div class="bb-sec">Under level ${minLv} (${under.length}) — not judged</div>`;
@@ -1058,13 +1083,16 @@
     const joined = now.dif != null ? (snap ? snap.ts : nowS()) - now.dif * 86400 : 0;
     const wars = Object.keys(cache).filter((k) => k.startsWith(fid + ':')).map((k) => cache[k])
       .filter((w) => w.war.end >= joined).sort((a, b) => b.war.end - a.war.end);
-    let tg = 0, tl = 0, th = 0, np = 0, nn = 0, nz = 0;
+    let tg = 0, tl = 0, th = 0, np = 0, nn = 0, nz = 0, ps = 0, pn = 0;
     const warRows = wars.map((w) => {
       const x = w.per[id] || { g: 0, l: 0, h: 0, d: 0 };
       tg += x.g; tl += x.l; th += x.h;
       const n = Math.round((x.g - x.l) * 100) / 100;
       if (n > 0) np++; else if (n < 0) nn++; else nz++;
+      const wp = x.g + x.l > 0 ? x.g / (x.g + x.l) : null;
+      if (wp != null) { ps += wp; pn++; }
       return `<tr><td>${tctDay(w.war.end)}</td><td>${esc(w.war.enemyName)}</td><td class="n">${x.h}</td><td class="n">${fmtN(x.g, 1)}</td><td class="n">${fmtN(x.l, 1)}</td>
+        <td class="n ${wp == null ? 'bb-muted' : wp >= 0.5 ? 'pos' : 'neg'}">${wp == null ? 'Null' : fmtN(wp * 100, 1) + '%'}</td>
         <td class="n ${n > 0 ? 'pos' : n < 0 ? 'neg' : 'bb-muted'}">${n === 0 ? 'Null' : (n > 0 ? '+' : '') + fmtN(n, 1)}</td></tr>`;
     }).join('');
     const tnet = tg - tl;
@@ -1075,11 +1103,11 @@
       <div style="margin:6px 0">${now.fl ? `<span class="bb-tag fl">FLAGGED — meets ${now.met}/4</span>` : now.ul ? '' : `<span class="bb-tag ok">Meets ${now.met}/4</span>`}${now.f.map((c) => `<span class="bb-tag">${esc(reasonText(now, c))}</span>`).join('')}</div>
 
       <div class="bb-h">Ranked war performance</div>
-      <div class="bb-kv"><div><b>${now.wj == null ? wars.length : now.wj}</b>Wars since joining</div><div><b><span class="pos">${np}▲</span> <span class="neg">${nn}▼</span></b>${nz} null</div><div><b>${th}</b>War hits</div>
+      <div class="bb-kv"><div><b class="${pn && ps / pn >= 0.5 ? 'pos' : pn ? 'neg' : ''}">${pn ? fmtN((ps / pn) * 100, 1) + '%' : '–'}</b>Avg war % (${pn} wars)</div><div><b>${now.wj == null ? wars.length : now.wj}</b>Wars since joining</div><div><b><span class="pos">${np}▲</span> <span class="neg">${nn}▼</span></b>${nz} null</div><div><b>${th}</b>War hits</div>
         <div><b class="pos">+${fmtN(tg, 1)}</b>Respect gained</div><div><b class="neg">−${fmtN(tl, 1)}</b>Respect lost</div><div><b class="${tnet > 0 ? 'pos' : tnet < 0 ? 'neg' : ''}">${tnet > 0 ? '+' : ''}${fmtN(tnet, 1)}</b>Net</div></div>`;
     h += wars.length
-      ? `<table class="bb-tbl"><tr><th>Ended</th><th>Enemy</th><th>Hits</th><th>Gained</th><th>Lost</th><th>Net</th></tr>${warRows}</table>
-         <div class="bb-muted" style="margin-top:4px">▲ = gained more than lost in that war, ▼ = lost more. Null = no respect gained or lost (not counted). Lost = respect the enemy took hitting this member.</div>`
+      ? `<table class="bb-tbl"><tr><th>Ended</th><th>Enemy</th><th>Hits</th><th>Gained</th><th>Lost</th><th>War %</th><th>Net</th></tr>${warRows}</table>
+         <div class="bb-muted" style="margin-top:4px">War % = gained ÷ (gained + lost) for that war; Avg war % is the average of those. ▲ = gained more than lost in that war, ▼ = lost more. Null = no respect gained or lost (not counted). Lost = respect the enemy took hitting this member.</div>`
       : '<p class="bb-muted">No measured ranked wars since joining.</p>';
 
     h += `<div class="bb-h">Inactive over ${cfg().inactiveHours}h — ${eps.length} time${eps.length === 1 ? '' : 's'}</div>`;
